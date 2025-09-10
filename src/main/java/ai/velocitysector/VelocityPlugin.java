@@ -14,7 +14,6 @@ import java.util.concurrent.TimeUnit;
 import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
 import org.slf4j.Logger;
-import redis.clients.jedis.JedisPubSub;
 
 @Plugin(id = "velocitysector", name = "VelocitySector", version = "1.0", description = "Plugin zarządzający przenoszeniem graczy między sektorami")
 public class VelocityPlugin {
@@ -46,7 +45,7 @@ public class VelocityPlugin {
         ChannelIdentifier chatChannel = MinecraftChannelIdentifier.create("global", "chat");
         proxy.getChannelRegistrar().register(chatChannel);
 
-        NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, getTpaRequests(), onlinePlayersListener);
+        NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, getTpaRequests(), onlinePlayersListener,logger);
         redisManager.subscribe(networkListener,
                 "sector-transfer", "aisector:tpa_request", "aisector:tpa_accept",
                 "aisector:tp_request", "aisector:summon_request",
@@ -55,7 +54,7 @@ public class VelocityPlugin {
         );
 
         proxy.getEventManager().register(this, new PlayerDisconectListener(mongoDBManager));
-        proxy.getEventManager().register(this, new PlayerJoinListener(mongoDBManager, redisManager, proxy));
+        proxy.getEventManager().register(this, new PlayerJoinVelocityListener(mongoDBManager, redisManager, proxy));
         proxy.getEventManager().register(this, new VelocityGlobalChat(proxy, logger));
         proxy.getEventManager().register(this, new TabCompleteListener(onlinePlayersListener));
         proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("msg").build(), new MsgCommand(proxy, onlinePlayersListener, redisManager, getLastMessagerMap()));

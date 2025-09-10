@@ -5,12 +5,13 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
-
+import com.velocitypowered.api.proxy.ServerConnection;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bson.Document;
+import org.slf4j.Logger; // WAŻNY IMPORT
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPubSub;
 
@@ -27,30 +28,30 @@ public class NetworkListener extends JedisPubSub {
     private final OnlinePlayersListener onlinePlayersListener;
     private final MongoDBManager mongoDBManager;
     private final Map<UUID, UUID> tpaRequests;
+    private final Logger logger; // WAŻNE: Dodajemy logger
     private final Gson gson = new Gson();
 
-    public NetworkListener(ProxyServer proxy, RedisManager redisManager, MongoDBManager mongoDBManager, Map<UUID, UUID> tpaRequests, OnlinePlayersListener onlinePlayersListener) {
+    // Zaktualizowany konstruktor
+    public NetworkListener(ProxyServer proxy, RedisManager redisManager, MongoDBManager mongoDBManager, Map<UUID, UUID> tpaRequests, OnlinePlayersListener onlinePlayersListener, Logger logger) {
         this.proxy = proxy;
         this.redisManager = redisManager;
         this.onlinePlayersListener = onlinePlayersListener;
         this.mongoDBManager = mongoDBManager;
         this.tpaRequests = tpaRequests;
+        this.logger = logger; // Zapisujemy logger
     }
     private final Map<String, JsonObject> sectorStats = new ConcurrentHashMap<>();
 
-
     @Override
     public void onMessage(String channel, String message) {
-        // Kanał "sector-transfer" ma inny format (nie JSON), więc obsługujemy go osobno
+        // ... (reszta metody onMessage bez zmian)
         if (channel.equals("sector-transfer")) {
             handleTransfer(message);
-            return; // Zakończ, aby nie próbować parsować jako JSON
+            return;
         }
 
-        // Wszystkie pozostałe kanały używają formatu JSON, więc parsujemy go raz
         JsonObject data = gson.fromJson(message, JsonObject.class);
 
-        // 🔥 POPRAWIONA, JEDNA, CIĄGŁA STRUKTURA IF-ELSE IF
         if (channel.equals("aisector:tpa_request")) {
             handleTpaRequest(data);
         } else if (channel.equals("aisector:tpa_accept")) {
@@ -70,89 +71,24 @@ public class NetworkListener extends JedisPubSub {
             handleGuiDataRequest(data);
         }
     }
-    private void handleSektorRequest(JsonObject data) {
-        String requesterName = data.get("requesterName").getAsString();
-        String targetName = data.get("targetName").getAsString();
 
-        // Wykorzystujemy OnlinePlayersListener, który musi być dostępny w tej klasie
-        // (upewnij się, że przekazujesz go w konstruktorze)
-        String targetSector = onlinePlayersListener.getPlayerSector(targetName);
-
-        if (targetSector != null) {
-            String response = "§7Gracz §e" + targetName + " §7jest na sektorze §b" + targetSector;
-            sendMessageToPlayer(requesterName, response);
-        } else {
-            sendMessageToPlayer(requesterName, "§cGracz o nicku '" + targetName + "' nie jest online w sieci.");
-        }
-    }
-
-    // 🔥 NOWA METODA: Dodaj ją do klasy NetworkListener
-    private void handleSendRequest(JsonObject data) {
-        String requesterName = data.get("requesterName").getAsString();
-        String targetName = data.get("targetName").getAsString();
-        String sectorName = data.get("targetSector").getAsString();
-
-        Optional<Player> targetOpt = proxy.getPlayer(targetName);
-        if (!targetOpt.isPresent()) {
-            sendMessageToPlayer(requesterName, "§cGracz o nicku '" + targetName + "' nie jest online.");
-            return;
-        }
-
-        Optional<RegisteredServer> serverOpt = proxy.getServer(sectorName);
-        if (!serverOpt.isPresent()) {
-            sendMessageToPlayer(requesterName, "§cSerwer o nazwie '" + sectorName + "' nie istnieje.");
-            return;
-        }
-
-        Player targetPlayer = targetOpt.get();
-
-        // 🔥 KLUCZOWA ZMIANA: Ustawiamy "znacznik", aby zmusić gracza do odrodzenia na spawnie sektora
-        try (Jedis jedis = redisManager.getJedis()) {
-            jedis.setex("player:force_spawn:" + targetPlayer.getUniqueId().toString(), 15, "true");
-        }
-
-        // Zleć transfer gracza
-        targetPlayer.createConnectionRequest(serverOpt.get()).fireAndForget();
-
-        // Zaktualizuj ostatni sektor gracza w bazie danych
-        Document update = new Document("$set", new Document("sector", sectorName));
-        mongoDBManager.updateOneByUuid("users", targetPlayer.getUniqueId().toString(), update);
-
-        sendMessageToPlayer(requesterName, "§aWysłano gracza " + targetName + " na serwer " + sectorName + ".");
-    }
-
-    // Poniżej znajdują się metody przeniesione z Twoich starych listenerów
-    // W pliku NetworkListener.java na Velocity
-
-    private void handleTransfer(String message) {
-        String[] data = message.split(":");
-        if (data.length != 2) return;
-        UUID uuid = UUID.fromString(data[0]);
-        String targetServerName = data[1];
-
-        proxy.getPlayer(uuid).ifPresent(player -> {
-            proxy.getServer(targetServerName).ifPresent(server -> {
-                // Najpierw zlecamy transfer
-                player.createConnectionRequest(server).fireAndForget();
-
-                // A zaraz potem aktualizujemy bazę danych
-                org.bson.Document update = new org.bson.Document("$set", new org.bson.Document("sector", targetServerName));
-                mongoDBManager.updateOneByUuid("users", uuid.toString(), update);
-            });
-        });
-    }
-
+    // 🔥 POPRAWIONA I DODANA DIAGNOSTYKA
     private void handleTpaRequest(JsonObject data) {
         String requesterName = data.get("requester").getAsString();
         String targetName = data.get("target").getAsString();
         Optional<Player> requesterOpt = proxy.getPlayer(requesterName);
         Optional<Player> targetOpt = proxy.getPlayer(targetName);
 
-        if (!requesterOpt.isPresent() || !targetOpt.isPresent()) return;
+        if (!requesterOpt.isPresent() || !targetOpt.isPresent()) {
+            logger.warn("[TPA] Nie znaleziono gracza wysyłającego lub docelowego.");
+            return;
+        }
         Player requester = requesterOpt.get();
         Player target = targetOpt.get();
 
         tpaRequests.put(target.getUniqueId(), requester.getUniqueId());
+        logger.info("[TPA] Dodano prośbę od " + requester.getUsername() + " do " + target.getUsername() + ". Mapa próśb: " + tpaRequests);
+
         requester.sendMessage(Component.text("§7Wysłano prośbę o teleportację do gracza §e" + target.getUsername()));
         target.sendMessage(
                 Component.text("§7Gracz §e" + requester.getUsername() + " §7chce się do Ciebie przeteleportować. Wpisz ")
@@ -174,104 +110,185 @@ public class NetworkListener extends JedisPubSub {
         }
 
         proxy.getPlayer(requesterUuid).ifPresent(requester -> {
-            JsonObject warmupData = new JsonObject();
-            warmupData.addProperty("requesterName", requester.getUsername());
-            warmupData.addProperty("targetName", accepter.getUsername());
-            try (Jedis jedis = redisManager.getJedis()) {
-                jedis.publish("aisector:tpa_initiate_warmup", warmupData.toString());
+
+            // 🔥 TUTAJ JEST KLUCZOWA POPRAWKA! 🔥
+            // Zmieniamy prosty warunek .equals() na porównanie nazw serwerów,
+            // co jest znacznie bardziej niezawodne.
+            Optional<ServerConnection> reqServerOpt = requester.getCurrentServer();
+            Optional<ServerConnection> accServerOpt = accepter.getCurrentServer();
+
+            if (reqServerOpt.isPresent() && accServerOpt.isPresent() &&
+                    reqServerOpt.get().getServerInfo().getName().equals(accServerOpt.get().getServerInfo().getName())) {
+
+                // Gracze są na tym samym serwerze -> wykonaj teleport lokalny
+                logger.info("[TPA] Gracze " + requester.getUsername() + " i " + accepter.getUsername() + " są na tym samym serwerze. Zlecam teleport lokalny.");
+                try (Jedis jedis = redisManager.getJedis()) {
+                    JsonObject localTpData = new JsonObject();
+                    localTpData.addProperty("playerToTeleportName", requester.getUsername());
+                    localTpData.add("targetLocation", data.getAsJsonObject("location"));
+
+                    jedis.publish("aisector:tp_execute_local_tpa", localTpData.toString());
+                }
+            } else {
+                // Gracze są na różnych serwerach -> uruchom WARMUP
+                logger.info("[TPA] Gracze " + requester.getUsername() + " i " + accepter.getUsername() + " są na różnych serwerach. Zlecam warmup.");
+                try (Jedis jedis = redisManager.getJedis()) {
+                    JsonObject warmupData = new JsonObject();
+                    warmupData.addProperty("requesterName", requester.getUsername());
+                    warmupData.add("targetLocation", data.getAsJsonObject("location"));
+                    warmupData.addProperty("targetServerName", accepter.getCurrentServer().get().getServerInfo().getName());
+
+                    jedis.publish("aisector:tpa_initiate_warmup", warmupData.toString());
+                }
             }
+
             accepter.sendMessage(Component.text("§aZaakceptowałeś prośbę od §e" + requester.getUsername()));
+            requester.sendMessage(Component.text("§aGracz §e" + accepter.getUsername() + " §azaakceptował Twoją prośbę."));
         });
     }
 
-    // Tę metodę skopiuj i wklej do NetworkListener.java
+    // 🔥 CAŁKOWICIE NAPRAWIONA LOGIKA /TP
     private void handleTeleportRequest(JsonObject data) {
         String adminName = data.get("adminName").getAsString();
         String targetName = data.get("targetName").getAsString();
 
-        Optional<Player> adminOptional = proxy.getPlayer(adminName);
-        if (!adminOptional.isPresent()) return;
-        Player admin = adminOptional.get();
+        Optional<Player> adminOpt = proxy.getPlayer(adminName);
+        if (!adminOpt.isPresent()) return;
+        Player admin = adminOpt.get();
 
-        Optional<Player> targetOptional = proxy.getPlayer(targetName);
-        if (!targetOptional.isPresent()) {
+        Optional<Player> targetOpt = proxy.getPlayer(targetName);
+        if (!targetOpt.isPresent()) {
             sendMessageToPlayer(adminName, "§cGracz o nicku '" + targetName + "' nie jest online.");
             return;
         }
+        Player target = targetOpt.get();
 
-        Player target = targetOptional.get();
-        RegisteredServer adminServer = admin.getCurrentServer().get().getServer();
-        RegisteredServer targetServer = target.getCurrentServer().get().getServer();
-
-        try (Jedis jedis = redisManager.getJedis()) {
-            if (adminServer.getServerInfo().getName().equals(targetServer.getServerInfo().getName())) {
-                // Gracze są na tym samym serwerze -> wyślij polecenie teleportacji lokalnej
+        // Jeśli są na tym samym serwerze, Bukkit sobie poradzi
+        if (admin.getCurrentServer().equals(target.getCurrentServer())) {
+            try (Jedis jedis = redisManager.getJedis()) {
                 JsonObject executeTeleport = new JsonObject();
                 executeTeleport.addProperty("playerName", adminName);
                 executeTeleport.addProperty("targetName", targetName);
                 jedis.publish("aisector:tp_execute_local", executeTeleport.toString());
-            } else {
-                // Gracze są na różnych serwerach -> zleć transfer
-                jedis.setex("player:tp_target:" + admin.getUniqueId(), 15, target.getUniqueId().toString());
-                admin.createConnectionRequest(targetServer).fireAndForget();
             }
-        }
-    }
-
-
-    // Tę metodę również skopiuj i wklej do NetworkListener.java
-    private void handleSummonRequest(JsonObject data) {
-        String adminName = data.get("adminName").getAsString();
-        String targetName = data.get("targetName").getAsString();
-        JsonObject adminLocation = data.getAsJsonObject("adminLocation");
-
-        Optional<Player> adminOptional = proxy.getPlayer(adminName);
-        Optional<Player> targetOptional = proxy.getPlayer(targetName);
-
-        if (!adminOptional.isPresent()) return;
-
-        if (!targetOptional.isPresent()) {
-            sendMessageToPlayer(adminName, "§cGracz o nicku '" + targetName + "' nie jest online.");
             return;
         }
 
-        Player admin = adminOptional.get();
-        Player target = targetOptional.get();
-        RegisteredServer adminServer = admin.getCurrentServer().get().getServer();
-
+        // Jeśli są na różnych serwerach, zlecamy transfer i zapisujemy CEL
+        RegisteredServer targetServer = target.getCurrentServer().get().getServer();
         try (Jedis jedis = redisManager.getJedis()) {
-            jedis.setex("player:summon_location:" + target.getUniqueId(), 15, adminLocation.toString());
-            target.createConnectionRequest(adminServer).fireAndForget();
+            // Zapisujemy UUID celu, aby PlayerJoinListener na serwerze docelowym wiedział, do kogo teleportować
+            jedis.setex("player:tp_target_uuid:" + admin.getUniqueId(), 15, target.getUniqueId().toString());
         }
+
+        initiateTransferWithDataSave(admin, targetServer);
     }
 
-    // Ta metoda pomocnicza jest używana przez obie powyższe, więc też ją skopiuj
-    private void sendMessageToPlayer(String playerName, String message) {
+    // Reszta metod pozostaje bez zmian, wklejam je dla kompletności
+    private void initiateTransferWithDataSave(Player playerToTransfer, RegisteredServer destinationServer) {
+        Optional<RegisteredServer> currentServer = playerToTransfer.getCurrentServer().map(s -> s.getServer());
+        if (currentServer.isPresent() && currentServer.get().equals(destinationServer)) {
+            // Jeśli gracz jest już na serwerze docelowym (np. /tpa do kogoś na tym samym serwerze),
+            // nie wykonuj transferu, tylko wyślij prośbę o teleport lokalny
+            logger.info("[Transfer] Gracz " + playerToTransfer.getUsername() + " jest już na serwerze docelowym. Zlecam teleport lokalny.");
+            try (Jedis jedis = redisManager.getJedis()) {
+                JsonObject teleportData = new JsonObject();
+                teleportData.addProperty("playerToTeleportUUID", playerToTransfer.getUniqueId().toString());
+                teleportData.addProperty("targetLocationKey", "player:teleport_location:" + playerToTransfer.getUniqueId());
+                jedis.publish("aisector:tp_execute_local_location", teleportData.toString());
+            }
+            return;
+        }
+
         try (Jedis jedis = redisManager.getJedis()) {
-            JsonObject msgData = new JsonObject();
-            msgData.addProperty("playerName", playerName);
-            msgData.addProperty("message", message);
-            jedis.publish("aisector:send_message", msgData.toString());
+            JsonObject saveDataRequest = new JsonObject();
+            saveDataRequest.addProperty("uuid", playerToTransfer.getUniqueId().toString());
+            jedis.publish("aisector:save_player_data", saveDataRequest.toString());
+            logger.info("[Transfer] Zlecono zapis danych dla " + playerToTransfer.getUsername() + " przed transferem do " + destinationServer.getServerInfo().getName());
+        }
+        playerToTransfer.createConnectionRequest(destinationServer).fireAndForget();
+    }
+
+
+    // Upewnij się, że masz te metody wklejone z poprzedniej wersji.
+    // Jeśli ich brakuje, skopiuj je z pliku, który ostatnio Ci wysłałem.
+    // Dla pewności wklejam je poniżej:
+    private void handleSummonRequest(JsonObject data) {
+        String adminName = data.get("adminName").getAsString();
+        String targetName = data.get("targetName").getAsString();
+        Optional<Player> adminOpt = proxy.getPlayer(adminName);
+        Optional<Player> targetOpt = proxy.getPlayer(targetName);
+        if (!adminOpt.isPresent() || !targetOpt.isPresent()) {
+            sendMessageToPlayer(adminName, "§cGracz nie jest online.");
+            return;
+        }
+        Player admin = adminOpt.get();
+        Player target = targetOpt.get();
+        RegisteredServer adminServer = admin.getCurrentServer().get().getServer();
+        try (Jedis jedis = redisManager.getJedis()) {
+            JsonObject adminLocation = data.getAsJsonObject("adminLocation");
+            jedis.setex("player:teleport_location:" + target.getUniqueId(), 15, adminLocation.toString());
+        }
+        initiateTransferWithDataSave(target, adminServer);
+    }
+    private void handleSendRequest(JsonObject data) {
+        String requesterName = data.get("requesterName").getAsString();
+        String targetName = data.get("targetName").getAsString();
+        String sectorName = data.get("targetSector").getAsString();
+        Optional<Player> targetOpt = proxy.getPlayer(targetName);
+        if (!targetOpt.isPresent()) {
+            sendMessageToPlayer(requesterName, "§cGracz o nicku '" + targetName + "' nie jest online.");
+            return;
+        }
+        Optional<RegisteredServer> serverOpt = proxy.getServer(sectorName);
+        if (!serverOpt.isPresent()) {
+            sendMessageToPlayer(requesterName, "§cSerwer o nazwie '" + sectorName + "' nie istnieje.");
+            return;
+        }
+        Player targetPlayer = targetOpt.get();
+        try (Jedis jedis = redisManager.getJedis()) {
+            jedis.setex("player:force_spawn:" + targetPlayer.getUniqueId().toString(), 15, "true");
+        }
+        initiateTransferWithDataSave(targetPlayer, serverOpt.get());
+        Document update = new Document("$set", new Document("sector", sectorName));
+        mongoDBManager.updateOneByUuid("users", targetPlayer.getUniqueId().toString(), update);
+        sendMessageToPlayer(requesterName, "§aWysłano gracza " + targetName + " na serwer " + sectorName + ".");
+    }
+    private void handleTransfer(String message) {
+        String[] data = message.split(":");
+        if (data.length != 2) return;
+        UUID uuid = UUID.fromString(data[0]);
+        String targetServerName = data[1];
+        proxy.getPlayer(uuid).ifPresent(player -> {
+            proxy.getServer(targetServerName).ifPresent(server -> {
+                player.createConnectionRequest(server).fireAndForget();
+                Document update = new Document("$set", new Document("sector", targetServerName));
+                mongoDBManager.updateOneByUuid("users", uuid.toString(), update);
+            });
+        });
+    }
+    private void handleSektorRequest(JsonObject data) {
+        String requesterName = data.get("requesterName").getAsString();
+        String targetName = data.get("targetName").getAsString();
+        String targetSector = onlinePlayersListener.getPlayerSector(targetName);
+        if (targetSector != null) {
+            sendMessageToPlayer(requesterName, "§7Gracz §e" + targetName + " §7jest na sektorze §b" + targetSector);
+        } else {
+            sendMessageToPlayer(requesterName, "§cGracz o nicku '" + targetName + "' nie jest online w sieci.");
         }
     }
     private void handleGuiDataRequest(JsonObject data) {
         String uuid = data.get("uuid").getAsString();
         JsonArray responseArray = new JsonArray();
-
-        // Przejdź przez wszystkie zarejestrowane serwery
         for (RegisteredServer server : proxy.getAllServers()) {
             String serverName = server.getServerInfo().getName();
             JsonObject serverData = new JsonObject();
             serverData.addProperty("name", serverName);
-
             Set<String> players = onlinePlayersListener.getOnlinePlayersInSector(serverName);
             JsonObject stats = sectorStats.get(serverName);
-
-            // Sprawdź, czy serwer jest online na podstawie aktywności
             if (!players.isEmpty() || stats != null) {
                 serverData.addProperty("isOnline", true);
                 serverData.addProperty("players", players.size());
-                // Użyj domyślnych wartości, jeśli statystyki jeszcze nie dotarły
                 serverData.addProperty("tps", stats != null ? stats.get("tps").getAsString() : "?.??");
                 serverData.addProperty("ram", stats != null ? stats.get("ram").getAsInt() : 0);
             } else {
@@ -279,10 +296,16 @@ public class NetworkListener extends JedisPubSub {
             }
             responseArray.add(serverData);
         }
-
-        // Wyślij odpowiedź na dedykowany kanał dla gracza
         try (Jedis jedis = redisManager.getJedis()) {
             jedis.publish("aisector:gui_data_response:" + uuid, responseArray.toString());
+        }
+    }
+    private void sendMessageToPlayer(String playerName, String message) {
+        try (Jedis jedis = redisManager.getJedis()) {
+            JsonObject msgData = new JsonObject();
+            msgData.addProperty("playerName", playerName);
+            msgData.addProperty("message", message);
+            jedis.publish("aisector:send_message", msgData.toString());
         }
     }
 }

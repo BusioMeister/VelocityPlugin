@@ -11,13 +11,13 @@ import redis.clients.jedis.Jedis;
 
 import java.util.Optional;
 
-public class PlayerJoinListener {
+public class PlayerJoinVelocityListener {
     private final MongoDBManager database;
     private final RedisManager redisManager; // Potrzebujemy go z powrotem
     private final ProxyServer proxy;
 
     // Zaktualizowany konstruktor
-    public PlayerJoinListener(MongoDBManager database, RedisManager redisManager, ProxyServer proxy) {
+    public PlayerJoinVelocityListener(MongoDBManager database, RedisManager redisManager, ProxyServer proxy) {
         this.database = database;
         this.redisManager = redisManager;
         this.proxy = proxy;
