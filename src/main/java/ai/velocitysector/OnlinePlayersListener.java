@@ -30,6 +30,15 @@ public class OnlinePlayersListener extends JedisPubSub {
         }
         return all;
     }
+    // W pliku OnlinePlayersListener.java na Velocity
+    public String getPlayerSector(String playerName) {
+        for (Map.Entry<String, Set<String>> entry : sectorOnlinePlayers.entrySet()) {
+            if (entry.getValue().stream().anyMatch(name -> name.equalsIgnoreCase(playerName))) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
 
     public Set<String> getOnlinePlayersInSector(String sector) {
         return sectorOnlinePlayers.getOrDefault(sector, Collections.emptySet());

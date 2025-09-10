@@ -62,6 +62,13 @@ public class MongoDBManager {
         MongoCollection<Document> collection = getCollection(collectionName);
         return collection.find(filter).first();
     }
+    public void updateOneByUuid(String collectionName, String uuid, Document update) {
+        getCollection(collectionName).updateOne(
+                Filters.eq("uuid", uuid),
+                update,
+                new UpdateOptions().upsert(true) // Opcja upsert(true) stworzy dokument, jeśli nie istnieje
+        );
+    }
 
     // Zamknięcie połączenia
     public void close() {

@@ -24,6 +24,8 @@ public class VelocityPlugin {
     private MongoDBManager mongoDBManager;
     private OnlinePlayersListener onlinePlayersListener;
     private final Map<UUID, UUID> lastMessagerMap = new ConcurrentHashMap<>();
+    private final Map<UUID, UUID> tpaRequests = new ConcurrentHashMap<>();
+
     @Inject
     public VelocityPlugin(ProxyServer proxy, Logger logger) {
         this.proxy = proxy;
@@ -40,26 +42,27 @@ public class VelocityPlugin {
 
         redisManager = new RedisManager("127.0.0.1", 6379);
         mongoDBManager = new MongoDBManager("mongodb://localhost:27017","users");
+        NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, getTpaRequests());
+        redisManager.subscribe(networkListener,
+                "sector-transfer",
+                "aisector:tpa_request",
+                "aisector:tpa_accept",
+                "aisector:tp_request",
+                "aisector:summon_request"
+        );
 
-        // Poprawny blok
-        // W metodzie onProxyInitialization()
-        redisManager.subscribe(new TeleportRequestListener(proxy, redisManager), "aisector:tp_request");
-        redisManager.subscribe(new TransferListener(proxy), "sector-transfer");
-        redisManager.subscribe(new TransferListener(proxy),"sector-border-init");
-        redisManager.subscribe(new SummonRequestListener(proxy, redisManager), "aisector:summon_request");
         onlinePlayersListener = new OnlinePlayersListener();
         redisManager.psubscribe(onlinePlayersListener, "sector-online:*");
 
-        logger.info("Zarejestrowano listener do globalnego uzupełniania nicków.");
-        logger.info("Nasłuchiwanie Redis na kanale 'sector-transfer' zostało rozpoczęte.");
-        logger.info("Nasłuchiwanie Redis na kanale 'sector-border-init' zostało rozpoczęte.");
-        logger.info("Nasłuchiwanie Redis na kanale 'sector-online' zostało rozpoczęte.");
-        logger.info("Nasłuchiwanie Redis na kanale 'global:chat' zostało rozpoczęte.");
+
 
         proxy.getEventManager().register(this, new PlayerDisconectListener(mongoDBManager));
         proxy.getEventManager().register(this, new PlayerJoinListener(mongoDBManager, redisManager, proxy));
         proxy.getEventManager().register(this, new VelocityGlobalChat(proxy, logger));
         proxy.getEventManager().register(this, new TabCompleteListener(onlinePlayersListener));
+
+        proxy.getCommandManager().register("sektor", new SektorCommand(onlinePlayersListener));
+        proxy.getCommandManager().register("send", new SendCommand(proxy, onlinePlayersListener));
 
         proxy.getCommandManager().register("msg", new MsgCommand(proxy, onlinePlayersListener, redisManager, getLastMessagerMap()));
         proxy.getCommandManager().register("r", new ReplyCommand(proxy, redisManager, getLastMessagerMap()));
@@ -80,5 +83,8 @@ public class VelocityPlugin {
     }
     public Map<UUID, UUID> getLastMessagerMap() {
         return lastMessagerMap;
+    }
+    public Map<UUID, UUID> getTpaRequests() {
+        return tpaRequests;
     }
 }
