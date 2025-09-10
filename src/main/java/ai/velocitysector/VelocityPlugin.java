@@ -37,35 +37,29 @@ public class VelocityPlugin {
     public void onProxyInitialize(ProxyInitializeEvent event) {
         logger.info("VelocitySector Plugin został uruchomiony!");
 
-        ChannelIdentifier chatChannel = MinecraftChannelIdentifier.create("global", "chat");
-        proxy.getChannelRegistrar().register(chatChannel);
-
         redisManager = new RedisManager("127.0.0.1", 6379);
         mongoDBManager = new MongoDBManager("mongodb://localhost:27017","users");
-        NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, getTpaRequests());
-        redisManager.subscribe(networkListener,
-                "sector-transfer",
-                "aisector:tpa_request",
-                "aisector:tpa_accept",
-                "aisector:tp_request",
-                "aisector:summon_request"
-        );
 
         onlinePlayersListener = new OnlinePlayersListener();
         redisManager.psubscribe(onlinePlayersListener, "sector-online:*");
 
+        ChannelIdentifier chatChannel = MinecraftChannelIdentifier.create("global", "chat");
+        proxy.getChannelRegistrar().register(chatChannel);
 
+        NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, getTpaRequests(), onlinePlayersListener);
+        redisManager.subscribe(networkListener,
+                "sector-transfer", "aisector:tpa_request", "aisector:tpa_accept",
+                "aisector:tp_request", "aisector:summon_request",
+                "aisector:sektor_request", "aisector:send_request"
+        );
 
         proxy.getEventManager().register(this, new PlayerDisconectListener(mongoDBManager));
         proxy.getEventManager().register(this, new PlayerJoinListener(mongoDBManager, redisManager, proxy));
         proxy.getEventManager().register(this, new VelocityGlobalChat(proxy, logger));
         proxy.getEventManager().register(this, new TabCompleteListener(onlinePlayersListener));
+        proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("msg").build(), new MsgCommand(proxy, onlinePlayersListener, redisManager, getLastMessagerMap()));
+        proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("r").aliases("reply").build(), new ReplyCommand(proxy, redisManager, getLastMessagerMap()));
 
-        proxy.getCommandManager().register("sektor", new SektorCommand(onlinePlayersListener));
-        proxy.getCommandManager().register("send", new SendCommand(proxy, onlinePlayersListener));
-
-        proxy.getCommandManager().register("msg", new MsgCommand(proxy, onlinePlayersListener, redisManager, getLastMessagerMap()));
-        proxy.getCommandManager().register("r", new ReplyCommand(proxy, redisManager, getLastMessagerMap()));
         proxy.getScheduler().buildTask(this, new GlobalPlayerListPublisher(redisManager, onlinePlayersListener))
                 .repeat(3L, TimeUnit.SECONDS)
                 .schedule();

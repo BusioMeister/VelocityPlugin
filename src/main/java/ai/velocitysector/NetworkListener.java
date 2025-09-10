@@ -9,6 +9,7 @@ import com.velocitypowered.api.proxy.server.RegisteredServer;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
+import org.bson.Document;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPubSub;
 
@@ -20,13 +21,15 @@ public class NetworkListener extends JedisPubSub {
 
     private final ProxyServer proxy;
     private final RedisManager redisManager;
+    private final OnlinePlayersListener onlinePlayersListener;
     private final MongoDBManager mongoDBManager;
     private final Map<UUID, UUID> tpaRequests;
     private final Gson gson = new Gson();
 
-    public NetworkListener(ProxyServer proxy, RedisManager redisManager, MongoDBManager mongoDBManager, Map<UUID, UUID> tpaRequests) {
+    public NetworkListener(ProxyServer proxy, RedisManager redisManager, MongoDBManager mongoDBManager, Map<UUID, UUID> tpaRequests, OnlinePlayersListener onlinePlayersListener) {
         this.proxy = proxy;
         this.redisManager = redisManager;
+        this.onlinePlayersListener = onlinePlayersListener;
         this.mongoDBManager = mongoDBManager;
         this.tpaRequests = tpaRequests;
     }
@@ -44,7 +47,61 @@ public class NetworkListener extends JedisPubSub {
             handleTeleportRequest(gson.fromJson(message, JsonObject.class));
         } else if (channel.equals("aisector:summon_request")) {
             handleSummonRequest(gson.fromJson(message, JsonObject.class));
+        }if (channel.equals("aisector:sektor_request")) {
+            handleSektorRequest(gson.fromJson(message, JsonObject.class));
+        } else if (channel.equals("aisector:send_request")) {
+            handleSendRequest(gson.fromJson(message, JsonObject.class));
         }
+    }
+    private void handleSektorRequest(JsonObject data) {
+        String requesterName = data.get("requesterName").getAsString();
+        String targetName = data.get("targetName").getAsString();
+
+        // Wykorzystujemy OnlinePlayersListener, który musi być dostępny w tej klasie
+        // (upewnij się, że przekazujesz go w konstruktorze)
+        String targetSector = onlinePlayersListener.getPlayerSector(targetName);
+
+        if (targetSector != null) {
+            String response = "§7Gracz §e" + targetName + " §7jest na sektorze §b" + targetSector;
+            sendMessageToPlayer(requesterName, response);
+        } else {
+            sendMessageToPlayer(requesterName, "§cGracz o nicku '" + targetName + "' nie jest online w sieci.");
+        }
+    }
+
+    // 🔥 NOWA METODA: Dodaj ją do klasy NetworkListener
+    private void handleSendRequest(JsonObject data) {
+        String requesterName = data.get("requesterName").getAsString();
+        String targetName = data.get("targetName").getAsString();
+        String sectorName = data.get("targetSector").getAsString();
+
+        Optional<Player> targetOpt = proxy.getPlayer(targetName);
+        if (!targetOpt.isPresent()) {
+            sendMessageToPlayer(requesterName, "§cGracz o nicku '" + targetName + "' nie jest online.");
+            return;
+        }
+
+        Optional<RegisteredServer> serverOpt = proxy.getServer(sectorName);
+        if (!serverOpt.isPresent()) {
+            sendMessageToPlayer(requesterName, "§cSerwer o nazwie '" + sectorName + "' nie istnieje.");
+            return;
+        }
+
+        Player targetPlayer = targetOpt.get();
+
+        // 🔥 KLUCZOWA ZMIANA: Ustawiamy "znacznik", aby zmusić gracza do odrodzenia na spawnie sektora
+        try (Jedis jedis = redisManager.getJedis()) {
+            jedis.setex("player:force_spawn:" + targetPlayer.getUniqueId().toString(), 15, "true");
+        }
+
+        // Zleć transfer gracza
+        targetPlayer.createConnectionRequest(serverOpt.get()).fireAndForget();
+
+        // Zaktualizuj ostatni sektor gracza w bazie danych
+        Document update = new Document("$set", new Document("sector", sectorName));
+        mongoDBManager.updateOneByUuid("users", targetPlayer.getUniqueId().toString(), update);
+
+        sendMessageToPlayer(requesterName, "§aWysłano gracza " + targetName + " na serwer " + sectorName + ".");
     }
 
     // Poniżej znajdują się metody przeniesione z Twoich starych listenerów
