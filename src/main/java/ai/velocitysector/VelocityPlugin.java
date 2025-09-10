@@ -50,7 +50,8 @@ public class VelocityPlugin {
         redisManager.subscribe(networkListener,
                 "sector-transfer", "aisector:tpa_request", "aisector:tpa_accept",
                 "aisector:tp_request", "aisector:summon_request",
-                "aisector:sektor_request", "aisector:send_request"
+                "aisector:sektor_request", "aisector:send_request","aisector:sector_stats",
+                "aisector:gui_data_request"
         );
 
         proxy.getEventManager().register(this, new PlayerDisconectListener(mongoDBManager));

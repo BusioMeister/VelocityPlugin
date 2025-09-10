@@ -1,6 +1,7 @@
 package ai.velocitysector;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
@@ -15,7 +16,9 @@ import redis.clients.jedis.JedisPubSub;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class NetworkListener extends JedisPubSub {
 
@@ -33,24 +36,38 @@ public class NetworkListener extends JedisPubSub {
         this.mongoDBManager = mongoDBManager;
         this.tpaRequests = tpaRequests;
     }
+    private final Map<String, JsonObject> sectorStats = new ConcurrentHashMap<>();
+
 
     @Override
     public void onMessage(String channel, String message) {
-        // Używamy if-else if do obsługi różnych kanałów
+        // Kanał "sector-transfer" ma inny format (nie JSON), więc obsługujemy go osobno
         if (channel.equals("sector-transfer")) {
             handleTransfer(message);
-        } else if (channel.equals("aisector:tpa_request")) {
-            handleTpaRequest(gson.fromJson(message, JsonObject.class));
+            return; // Zakończ, aby nie próbować parsować jako JSON
+        }
+
+        // Wszystkie pozostałe kanały używają formatu JSON, więc parsujemy go raz
+        JsonObject data = gson.fromJson(message, JsonObject.class);
+
+        // 🔥 POPRAWIONA, JEDNA, CIĄGŁA STRUKTURA IF-ELSE IF
+        if (channel.equals("aisector:tpa_request")) {
+            handleTpaRequest(data);
         } else if (channel.equals("aisector:tpa_accept")) {
-            handleTpaAccept(gson.fromJson(message, JsonObject.class));
+            handleTpaAccept(data);
         } else if (channel.equals("aisector:tp_request")) {
-            handleTeleportRequest(gson.fromJson(message, JsonObject.class));
+            handleTeleportRequest(data);
         } else if (channel.equals("aisector:summon_request")) {
-            handleSummonRequest(gson.fromJson(message, JsonObject.class));
-        }if (channel.equals("aisector:sektor_request")) {
-            handleSektorRequest(gson.fromJson(message, JsonObject.class));
+            handleSummonRequest(data);
+        } else if (channel.equals("aisector:sektor_request")) {
+            handleSektorRequest(data);
         } else if (channel.equals("aisector:send_request")) {
-            handleSendRequest(gson.fromJson(message, JsonObject.class));
+            handleSendRequest(data);
+        } else if (channel.equals("aisector:sector_stats")) {
+            String sectorName = data.get("sectorName").getAsString();
+            sectorStats.put(sectorName, data);
+        } else if (channel.equals("aisector:gui_data_request")) {
+            handleGuiDataRequest(data);
         }
     }
     private void handleSektorRequest(JsonObject data) {
@@ -201,6 +218,7 @@ public class NetworkListener extends JedisPubSub {
         }
     }
 
+
     // Tę metodę również skopiuj i wklej do NetworkListener.java
     private void handleSummonRequest(JsonObject data) {
         String adminName = data.get("adminName").getAsString();
@@ -234,6 +252,37 @@ public class NetworkListener extends JedisPubSub {
             msgData.addProperty("playerName", playerName);
             msgData.addProperty("message", message);
             jedis.publish("aisector:send_message", msgData.toString());
+        }
+    }
+    private void handleGuiDataRequest(JsonObject data) {
+        String uuid = data.get("uuid").getAsString();
+        JsonArray responseArray = new JsonArray();
+
+        // Przejdź przez wszystkie zarejestrowane serwery
+        for (RegisteredServer server : proxy.getAllServers()) {
+            String serverName = server.getServerInfo().getName();
+            JsonObject serverData = new JsonObject();
+            serverData.addProperty("name", serverName);
+
+            Set<String> players = onlinePlayersListener.getOnlinePlayersInSector(serverName);
+            JsonObject stats = sectorStats.get(serverName);
+
+            // Sprawdź, czy serwer jest online na podstawie aktywności
+            if (!players.isEmpty() || stats != null) {
+                serverData.addProperty("isOnline", true);
+                serverData.addProperty("players", players.size());
+                // Użyj domyślnych wartości, jeśli statystyki jeszcze nie dotarły
+                serverData.addProperty("tps", stats != null ? stats.get("tps").getAsString() : "?.??");
+                serverData.addProperty("ram", stats != null ? stats.get("ram").getAsInt() : 0);
+            } else {
+                serverData.addProperty("isOnline", false);
+            }
+            responseArray.add(serverData);
+        }
+
+        // Wyślij odpowiedź na dedykowany kanał dla gracza
+        try (Jedis jedis = redisManager.getJedis()) {
+            jedis.publish("aisector:gui_data_response:" + uuid, responseArray.toString());
         }
     }
 }
