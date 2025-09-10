@@ -1,0 +1,18 @@
+# Ta sekcja musi zawierać WSZYSTKIE Twoje serwery
+servers:
+  Sector1:
+    address: "127.0.0.1:25565"
+  Sector2:
+    address: "127.0.0.1:25566"
+  Sector3:
+    address: "127.0.0.1:25567"
+  Sector4:
+    address: "127.0.0.1:25568"
+  Sector5:
+    address: "127.0.0.1:25569"
+
+# Ta sekcja pozostaje pusta, aby Twój plugin mógł decydować, gdzie wysłać gracza
+try:
+  connection-order: []
+
+# ... reszta Twojej konfiguracji ...

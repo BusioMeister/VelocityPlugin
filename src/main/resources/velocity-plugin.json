@@ -1,0 +1,8 @@
+{
+  "id": "velocitysector",
+  "name": "VelocitySector",
+  "version": "1.0",
+  "main": "ai.velocitysector.VelocityPlugin",
+  "authors": ["TwojaNazwa"],
+  "description": "Plugin zarządzający przenoszeniem graczy między sektorami"
+}
