@@ -42,8 +42,8 @@ public class VelocityPlugin {
         onlinePlayersListener = new OnlinePlayersListener();
         redisManager.psubscribe(onlinePlayersListener, "sector-online:*");
 
-        ChannelIdentifier chatChannel = MinecraftChannelIdentifier.create("global", "chat");
-        proxy.getChannelRegistrar().register(chatChannel);
+        proxy.getChannelRegistrar().register(VelocityGlobalChat.CHANNEL);
+        logger.info("Zarejestrowano kanał globalnego czatu: " + VelocityGlobalChat.CHANNEL.getId());
 
         NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, getTpaRequests(), onlinePlayersListener,logger);
         redisManager.subscribe(networkListener,
@@ -57,6 +57,7 @@ public class VelocityPlugin {
         proxy.getEventManager().register(this, new PlayerJoinVelocityListener(mongoDBManager, redisManager, proxy));
         proxy.getEventManager().register(this, new VelocityGlobalChat(proxy, logger));
         proxy.getEventManager().register(this, new TabCompleteListener(onlinePlayersListener));
+
         proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("msg").build(), new MsgCommand(proxy, onlinePlayersListener, redisManager, getLastMessagerMap()));
         proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("r").aliases("reply").build(), new ReplyCommand(proxy, redisManager, getLastMessagerMap()));
 

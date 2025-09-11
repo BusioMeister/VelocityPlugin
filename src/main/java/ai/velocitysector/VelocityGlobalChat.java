@@ -2,61 +2,47 @@ package ai.velocitysector;
 
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.PluginMessageEvent;
-import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.ServerConnection;
+import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
+import com.velocitypowered.api.proxy.server.RegisteredServer;
 import org.slf4j.Logger;
-
-import javax.inject.Inject;
 
 public class VelocityGlobalChat {
 
     private final ProxyServer proxy;
     private final Logger logger;
-    private boolean channelActive = false;  // flaga, czy dostaliśmy choć raz wiadomość
+    // Definiujemy stały, ujednolicony identyfikator kanału
+    public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create("global", "chat");
 
-    @Inject
     public VelocityGlobalChat(ProxyServer proxy, Logger logger) {
         this.proxy = proxy;
         this.logger = logger;
-        logger.info("Plugin VelocityGlobalChat uruchomiony. Oczekuję na wiadomości na kanale 'global:chat'.");
     }
 
     @Subscribe
     public void onPluginMessage(PluginMessageEvent event) {
-        String channel = event.getIdentifier().getId();
-
-        logger.info("Odebrano plugin message na kanale: " + channel);
-
-        if (!channel.equals("global:chat")) {
+        // Sprawdzamy, czy wiadomość przyszła na nasz kanał
+        if (!event.getIdentifier().equals(CHANNEL)) {
             return;
         }
 
-        // Odbieramy tylko wiadomości od backendu (serwera Minecraft, np. Sector1, Sector2)
+        // Upewniamy się, że źródłem jest serwer gry
         if (!(event.getSource() instanceof ServerConnection)) {
-            logger.info("Źródło wiadomości nie jest backendem (serwerem), ignoruję.");
             return;
         }
 
-        if (!channelActive) {
-            channelActive = true;
-            logger.info("Kanał 'global:chat' jest aktywny i nasłuchiwany poprawnie.");
-        }
-
+        // Pobieramy surowe dane wiadomości
         byte[] data = event.getData();
 
-        // Opcjonalnie podgląd wiadomości
-        try {
-            String msg = new java.io.DataInputStream(new java.io.ByteArrayInputStream(data)).readUTF();
-            logger.info("Treść wiadomości: " + msg);
-            // Broadcast na wszystkie serwery (lub wybranych graczy)
-            for (Player player : proxy.getAllPlayers()) {
-                player.sendMessage(net.kyori.adventure.text.Component.text(msg));
-            }
-        } catch (Exception e) {
-            logger.error("Błąd przy dekodowaniu wiadomości: " + e.getMessage());
+        // 🔥 KLUCZOWA POPRAWKA: Rozsyłamy wiadomość do WSZYSTKICH serwerów w sieci 🔥
+        // Zamiast wysyłać do graczy, przekazujemy wiadomość dalej do serwerów.
+        // Wtyczki na serwerach Bukkit (GlobalChatPlugin) odbiorą tę wiadomość
+        // i wyświetlą ją na czacie.
+        for (RegisteredServer server : proxy.getAllServers()) {
+            server.sendPluginMessage(CHANNEL, data);
         }
 
-        event.setResult(PluginMessageEvent.ForwardResult.handled());
+        logger.info("Przekazano wiadomość z globalnego czatu do wszystkich serwerów.");
     }
 }
