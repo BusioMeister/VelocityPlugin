@@ -50,7 +50,7 @@ public class VelocityPlugin {
                 "sector-transfer", "aisector:tpa_request", "aisector:tpa_accept",
                 "aisector:tp_request", "aisector:summon_request",
                 "aisector:sektor_request", "aisector:send_request","aisector:sector_stats",
-                "aisector:gui_data_request"
+                "aisector:gui_data_request", "aisector:invsee_request"
         );
 
         proxy.getEventManager().register(this, new PlayerDisconectListener(mongoDBManager));

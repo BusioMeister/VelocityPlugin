@@ -69,6 +69,22 @@ public class NetworkListener extends JedisPubSub {
             sectorStats.put(sectorName, data);
         } else if (channel.equals("aisector:gui_data_request")) {
             handleGuiDataRequest(data);
+        }else if (channel.equals("aisector:invsee_request")) {
+            handleInvseeRequest(data);
+        }
+    }
+    private void handleInvseeRequest(JsonObject data) {
+        String adminName = data.get("adminName").getAsString();
+        String targetName = data.get("targetName").getAsString();
+
+        String targetSector = onlinePlayersListener.getPlayerSector(targetName);
+        if (targetSector != null) {
+            // Serwer docelowy istnieje, przekaż prośbę dalej
+            try (Jedis jedis = redisManager.getJedis()) {
+                jedis.publish("aisector:invsee_get_data", data.toString());
+            }
+        } else {
+            sendMessageToPlayer(adminName, "§cGracz o nicku '" + targetName + "' nie jest online w sieci.");
         }
     }
 
