@@ -1,6 +1,6 @@
 aiSector-Velocity
 Plugin proxy dla sieci serwerów aiSector
-To jest oficjalny plugin-towarzysz dla aiSector (<- możesz tu wstawić link do swojego pierwszego repozytorium), niezbędny do zarządzania komunikacją i synchronizacją danych w całej sieci serwerów.
+To jest oficjalny plugin-towarzysz dla aiSector (https://github.com/BusioMeister/aiSector, niezbędny do zarządzania komunikacją i synchronizacją danych w całej sieci serwerów.
 
 O Projekcie
 Ten plugin jest nierozłączną częścią większego ekosystemu aiSector. Jego zadaniem jest pełnienie roli centralnego systemu nerwowego, który koordynuje akcje między poszczególnymi serwerami (sektorami).
