@@ -11,8 +11,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
-import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
-import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
 import org.slf4j.Logger;
 
 @Plugin(id = "velocitysector", name = "VelocitySector", version = "1.0", description = "Plugin zarządzający przenoszeniem graczy między sektorami")
@@ -24,6 +22,7 @@ public class VelocityPlugin {
     private OnlinePlayersListener onlinePlayersListener;
     private final Map<UUID, UUID> lastMessagerMap = new ConcurrentHashMap<>();
     private final Map<UUID, UUID> tpaRequests = new ConcurrentHashMap<>();
+
 
     @Inject
     public VelocityPlugin(ProxyServer proxy, Logger logger) {
@@ -45,20 +44,23 @@ public class VelocityPlugin {
         proxy.getChannelRegistrar().register(VelocityGlobalChat.CHANNEL);
         logger.info("Zarejestrowano kanał globalnego czatu: " + VelocityGlobalChat.CHANNEL.getId());
 
-        NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, getTpaRequests(), onlinePlayersListener,logger);
+        NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, getTpaRequests(), onlinePlayersListener, logger) {
+        };
         redisManager.subscribe(networkListener,
                 "sector-transfer", "aisector:tpa_request", "aisector:tpa_accept",
                 "aisector:tp_request", "aisector:summon_request",
                 "aisector:sektor_request", "aisector:send_request","aisector:sector_stats",
-                "aisector:gui_data_request", "aisector:invsee_request"
+                "aisector:gui_data_request", "aisector:invsee_request","aisector:admin_tp_request",
+                "aisector:admin_location_response","player:force_sector_spawn:"
         );
+
 
         proxy.getEventManager().register(this, new PlayerDisconectListener(mongoDBManager));
         proxy.getEventManager().register(this, new PlayerJoinVelocityListener(mongoDBManager, redisManager, proxy));
         proxy.getEventManager().register(this, new VelocityGlobalChat(proxy, logger));
         proxy.getEventManager().register(this, new TabCompleteListener(onlinePlayersListener));
 
-        proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("msg").build(), new MsgCommand(proxy, onlinePlayersListener, redisManager, getLastMessagerMap()));
+        proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("msg").build(), new MsgCommand(proxy, onlinePlayersListener, redisManager, getLastMessagerMap ()));
         proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("r").aliases("reply").build(), new ReplyCommand(proxy, redisManager, getLastMessagerMap()));
 
         proxy.getScheduler().buildTask(this, new GlobalPlayerListPublisher(redisManager, onlinePlayersListener))

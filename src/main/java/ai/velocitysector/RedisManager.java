@@ -1,80 +1,86 @@
+// RedisManager.java (Velocity)
 package ai.velocitysector;
 
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.JedisPoolConfig;
-import redis.clients.jedis.JedisPubSub;
-
-import java.util.ArrayList;
-import java.util.List;
+import redis.clients.jedis.*;
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class RedisManager {
 
     private final JedisPool jedisPool;
     private final String host;
     private final int port;
-
-    // Lista do śledzenia aktywnych subskrypcji, aby je poprawnie zamknąć
-    private final List<JedisPubSub> activeSubscribers = new ArrayList<>();
+    private final String password; // null jeśli brak
+    private final List<JedisPubSub> activeSubscribers = new CopyOnWriteArrayList<>();
 
     public RedisManager(String host, int port) {
-        this.host = host;
-        this.port = port;
-        // Używamy standardowej, bezpiecznej konfiguracji puli
-        this.jedisPool = new JedisPool(new JedisPoolConfig(), host, port);
+        this(host, port, null);
     }
 
-    // Ta metoda pozostaje bez zmian - dla zwykłych operacji
+    public RedisManager(String host, int port, String password) {
+        this.host = Objects.requireNonNull(host, "host");
+        this.port = port;
+        this.password = password;
+
+        JedisPoolConfig cfg = new JedisPoolConfig();
+        cfg.setMaxTotal(16);
+        cfg.setMaxIdle(8);
+        cfg.setMinIdle(1);
+        cfg.setTestOnBorrow(true);
+        cfg.setTestWhileIdle(true);
+
+        if (password == null || password.isEmpty()) {
+            this.jedisPool = new JedisPool(cfg, host, port, 2000);
+        } else {
+            this.jedisPool = new JedisPool(cfg, host, port, 2000, password);
+        }
+    }
+
     public Jedis getJedis() {
         return jedisPool.getResource();
     }
 
-    // 🔥 KLUCZOWA ZMIANA: Metoda 'subscribe' tworzy nowe, dedykowane połączenie
     public void subscribe(JedisPubSub listener, String... channels) {
+        Objects.requireNonNull(listener, "listener");
         activeSubscribers.add(listener);
-        new Thread(() -> {
-            try (Jedis subscriberJedis = new Jedis(host, port)) {
-                // Ta instancja 'subscriberJedis' jest używana TYLKO do nasłuchu
-                subscriberJedis.subscribe(listener, channels);
+        Thread t = new Thread(() -> {
+            try (Jedis sub = new Jedis(host, port)) {
+                if (password != null && !password.isEmpty()) sub.auth(password);
+                sub.subscribe(listener, channels);
             } catch (Exception e) {
-                // Błąd jest oczekiwany, gdy serwer się zamyka i subskrypcja jest przerywana
-                if (!e.getMessage().contains("Socket closed")) {
-                    System.out.println("Błąd w wątku subskrypcji Redis: " + e.getMessage());
+                if (e.getMessage() == null || !e.getMessage().contains("Socket closed")) {
+                    System.out.println("Błąd subskrypcji Redis: " + e.getMessage());
                 }
             }
-        }, "Redis-Subscriber-" + String.join("-", channels)).start();
+        }, "Redis-Subscriber-" + String.join("-", channels));
+        t.setDaemon(true);
+        t.start();
     }
 
-    // 🔥 KLUCZOWA ZMIANA: Metoda 'psubscribe' również tworzy nowe połączenie
     public void psubscribe(JedisPubSub listener, String pattern) {
+        Objects.requireNonNull(listener, "listener");
         activeSubscribers.add(listener);
-        new Thread(() -> {
-            try (Jedis subscriberJedis = new Jedis(host, port)) {
-                subscriberJedis.psubscribe(listener, pattern);
+        Thread t = new Thread(() -> {
+            try (Jedis sub = new Jedis(host, port)) {
+                if (password != null && !password.isEmpty()) sub.auth(password);
+                sub.psubscribe(listener, pattern);
             } catch (Exception e) {
-                if (!e.getMessage().contains("Socket closed")) {
-                    System.out.println("Błąd w wątku subskrypcji Redis (pattern): " + e.getMessage());
+                if (e.getMessage() == null || !e.getMessage().contains("Socket closed")) {
+                    System.out.println("Błąd psubskrypcji Redis: " + e.getMessage());
                 }
             }
-        }, "Redis-Pattern-Subscriber-" + pattern).start();
+        }, "Redis-Pattern-Subscriber-" + pattern);
+        t.setDaemon(true);
+        t.start();
     }
 
     public void close() {
-        // Najpierw zamykamy wszystkie aktywne subskrypcje
-        for (JedisPubSub subscriber : activeSubscribers) {
+        for (JedisPubSub s : activeSubscribers) {
             try {
-                if (subscriber.isSubscribed()) {
-                    subscriber.unsubscribe();
-                }
-            } catch (Exception e) {
-                // Ignoruj błędy, bo i tak zamykamy połączenie
-            }
+                if (s.isSubscribed()) s.unsubscribe();
+            } catch (Exception ignore) {}
         }
         activeSubscribers.clear();
-
-        // Potem zamykamy pulę połączeń
-        if (jedisPool != null && !jedisPool.isClosed()) {
-            jedisPool.close();
-        }
+        if (jedisPool != null && !jedisPool.isClosed()) jedisPool.close();
     }
 }

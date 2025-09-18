@@ -7,6 +7,7 @@ import com.velocitypowered.api.proxy.ProxyServer;
 import net.kyori.adventure.text.Component;
 import redis.clients.jedis.Jedis;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -50,20 +51,30 @@ public class MsgCommand implements SimpleCommand {
             sender.sendMessage(Component.text("§cGracz " + targetName + " nie jest online."));
             return;
         }
+        // MsgCommand.execute — fragment przed sprawdzeniem pm_disabled
+        boolean senderBypass = !(sender instanceof Player)
+                || ((Player) sender).hasPermission("aisector.wyjebane.bypass");
 
-        // Sprawdzenie, czy odbiorca ma wyłączone prywatne wiadomości
-        try (Jedis jedis = redisManager.getJedis()) {
-            if (jedis.exists("pm_disabled:" + target.getUniqueId())) {
+        if (sender instanceof Player && !senderBypass) {
+            try (redis.clients.jedis.Jedis j = redisManager.getJedis()) {
+                senderBypass = j.exists("bypass_pm:" + ((Player) sender).getUniqueId());
+            }
+        }
+
+        try (redis.clients.jedis.Jedis j = redisManager.getJedis()) {
+            boolean targetDisabled = j.exists("pm_disabled:" + target.getUniqueId());
+            if (targetDisabled && !senderBypass) {
                 sender.sendMessage(Component.text("§cTen gracz ma wyłączone prywatne wiadomości."));
                 return;
             }
         }
 
+
         String message = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
 
         // Wysłanie wiadomości do obu stron
-        target.sendMessage(Component.text("§b[PW od §b" + senderName + "§b] §b" + message));
-        sender.sendMessage(Component.text("§b[PW do §b" + target.getUsername() + "§b] §b" + message));
+        target.sendMessage(Component.text("§3" + senderName + "§b -> Ja §b" + message));
+        sender.sendMessage(Component.text("§3 Ja -> " + target.getUsername() + " §b" + message));
 
         // Zapisanie pary konwersacji dla komendy /r
         if (sender instanceof Player) {
@@ -77,11 +88,12 @@ public class MsgCommand implements SimpleCommand {
     @Override
     public List<String> suggest(Invocation invocation) {
         if (invocation.arguments().length <= 1) {
-            String partial = (invocation.arguments().length == 0) ? "" : invocation.arguments()[0].toLowerCase();
+            String partial = (invocation.arguments().length == 0)
+                    ? "" : invocation.arguments()[0].toLowerCase();
             return onlinePlayersListener.getAllOnlinePlayers().stream()
                     .filter(name -> name.toLowerCase().startsWith(partial))
                     .collect(Collectors.toList());
         }
-        return List.of();
+        return Collections.emptyList();
     }
 }

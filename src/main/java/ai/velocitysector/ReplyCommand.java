@@ -52,17 +52,26 @@ public class ReplyCommand implements SimpleCommand {
         }
         Player target = targetOptional.get();
 
-        // Sprawdź, czy odbiorca ma wyłączone PW
-        try (Jedis jedis = redisManager.getJedis()) {
-            if (jedis.exists("pm_disabled:" + target.getUniqueId())) {
+        // ReplyCommand.execute — przed sprawdzeniem targetDisabled
+        boolean senderBypass = sender.hasPermission("aisector.wyjebane.bypass");
+        if (!senderBypass) {
+            try (redis.clients.jedis.Jedis j = redisManager.getJedis()) {
+                senderBypass = j.exists("bypass_pm:" + sender.getUniqueId());
+            }
+        }
+
+        try (redis.clients.jedis.Jedis j = redisManager.getJedis()) {
+            boolean targetDisabled = j.exists("pm_disabled:" + target.getUniqueId());
+            if (targetDisabled && !senderBypass) {
                 sender.sendMessage(Component.text("§cTen gracz ma wyłączone prywatne wiadomości."));
                 return;
             }
         }
 
+
         String message = String.join(" ", args);
-        target.sendMessage(Component.text("§b[PW od " + sender.getUsername() + "] " + message));
-        sender.sendMessage(Component.text("§b[PW do " + target.getUsername() + "] " + message));
+        target.sendMessage(Component.text("§3" + sender.getUsername() + "§b -> Ja §b" + message));
+        sender.sendMessage(Component.text("§3 Ja -> " + target.getUsername() + " §b" + message));
     }
 
     @Override
