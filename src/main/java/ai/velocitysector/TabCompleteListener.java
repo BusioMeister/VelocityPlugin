@@ -12,7 +12,7 @@ public class TabCompleteListener {
     // --- POCZĄTEK POPRAWKI ---
     // Dodajemy "send" do listy komend
     private static final List<String> GLOBAL_PLAYER_COMMANDS = Arrays.asList(
-            "sektor", "send", "s", "tp", "tpa", "invsee"
+            "sektor", "send", "s", "tp", "tpa", "invsee" ,"kick" ,"ban" ," banip", "unban"
     );
     // --- KONIEC POPRAWKI ---
 

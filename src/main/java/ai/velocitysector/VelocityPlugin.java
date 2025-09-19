@@ -43,6 +43,7 @@ public class VelocityPlugin {
 
         proxy.getChannelRegistrar().register(VelocityGlobalChat.CHANNEL);
         logger.info("Zarejestrowano kanał globalnego czatu: " + VelocityGlobalChat.CHANNEL.getId());
+// w onProxyInitialize po utworzeniu redisManager
 
         NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, getTpaRequests(), onlinePlayersListener, logger) {
         };
@@ -51,7 +52,7 @@ public class VelocityPlugin {
                 "aisector:tp_request", "aisector:summon_request",
                 "aisector:sektor_request", "aisector:send_request","aisector:sector_stats",
                 "aisector:gui_data_request", "aisector:invsee_request","aisector:admin_tp_request",
-                "aisector:admin_location_response","player:force_sector_spawn:"
+                "aisector:admin_location_response","player:force_sector_spawn:","aisector:ban_broadcast", "aisector:ban_kick"
         );
 
 
@@ -59,14 +60,41 @@ public class VelocityPlugin {
         proxy.getEventManager().register(this, new PlayerJoinVelocityListener(mongoDBManager, redisManager, proxy));
         proxy.getEventManager().register(this, new VelocityGlobalChat(proxy, logger));
         proxy.getEventManager().register(this, new TabCompleteListener(onlinePlayersListener));
-
+        proxy.getEventManager().register(this, new BanLoginListener(redisManager, proxy,logger));
         proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("msg").build(), new MsgCommand(proxy, onlinePlayersListener, redisManager, getLastMessagerMap ()));
         proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("r").aliases("reply").build(), new ReplyCommand(proxy, redisManager, getLastMessagerMap()));
 
         proxy.getScheduler().buildTask(this, new GlobalPlayerListPublisher(redisManager, onlinePlayersListener))
                 .repeat(3L, TimeUnit.SECONDS)
                 .schedule();
-
+        redisManager.subscribe(new redis.clients.jedis.JedisPubSub() {
+            @Override public void onMessage(String channel, String message) {
+                if ("aisector:ban_broadcast".equals(channel)) {
+                    com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(message).getAsJsonObject();
+                    String type = json.get("type").getAsString();
+                    String name = json.get("name").getAsString();
+                    String by = json.get("by").getAsString();
+                    String reason = json.get("reason").getAsString();
+                    String text;
+                    if ("kick".equals(type)) {
+                        text = "§c" + name + " został wyrzucony §8- §f" + reason + " §8by §f" + by;
+                    } else {
+                        boolean perm = json.get("perm").getAsBoolean();
+                        long minutes = json.get("minutes").getAsLong();
+                        String time = perm ? "permanentnie" : (minutes + " min");
+                        text = (type.equals("ip")
+                                ? ("§c" + name + " został zbanowany IP §7(" + time + ") §8- §f" + reason + " §8by §f" + by)
+                                : ("§c" + name + " został zbanowany §7(" + time + ") §8- §f" + reason + " §8by §f" + by));
+                    }
+                    proxy.getAllPlayers().forEach(p -> p.sendMessage(net.kyori.adventure.text.Component.text(text)));
+                } else if ("aisector:ban_kick".equals(channel)) {
+                    com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(message).getAsJsonObject();
+                    java.util.UUID uuid = java.util.UUID.fromString(json.get("uuid").getAsString());
+                    String msg = json.get("message").getAsString();
+                    proxy.getPlayer(uuid).ifPresent(p -> p.disconnect(net.kyori.adventure.text.Component.text(msg)));
+                }
+            }
+        }, "aisector:ban_broadcast", "aisector:ban_kick");
         logger.info("Uruchomiono cykliczne wysyłanie globalnej listy graczy.");
     }
 
