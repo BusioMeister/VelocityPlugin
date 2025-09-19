@@ -26,7 +26,7 @@ public class MongoDBManager {
     }
 
     // Pobieranie kolekcji
-    private MongoCollection<Document> getCollection(String collectionName) {
+    public MongoCollection<Document> getCollection(String collectionName) {
         return database.getCollection(collectionName);
     }
 
