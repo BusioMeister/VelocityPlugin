@@ -1,5 +1,8 @@
 package ai.velocitysector;
 
+import ai.velocitysector.redis.packet.JsonCodec;
+import ai.velocitysector.redis.packet.RedisPacketPublisher;
+import ai.velocitysector.redis.packet.TpaInitiateWarmupPacket;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -157,39 +160,81 @@ public abstract class NetworkListener extends JedisPubSub {
 
     private void handleTpaAccept(JsonObject data) {
         String accepterName = data.get("accepter").getAsString();
+
         Optional<Player> accepterOpt = proxy.getPlayer(accepterName);
         if (!accepterOpt.isPresent()) return;
+
         Player accepter = accepterOpt.get();
+
         UUID requesterUuid = tpaRequests.remove(accepter.getUniqueId());
         if (requesterUuid == null) {
             accepter.sendMessage(Component.text("§cNie masz żadnych oczekujących próśb."));
             return;
         }
+
         proxy.getPlayer(requesterUuid).ifPresent(requester -> {
+
             Optional<ServerConnection> reqServerOpt = requester.getCurrentServer();
             Optional<ServerConnection> accServerOpt = accepter.getCurrentServer();
-            if (reqServerOpt.isPresent() && accServerOpt.isPresent() && reqServerOpt.get().getServerInfo().getName().equals(accServerOpt.get().getServerInfo().getName())) {
-                logger.info("[TPA] Gracze " + requester.getUsername() + " i " + accepter.getUsername() + " są na tym samym serwerze. Zlecam teleport lokalny.");
+            if (!reqServerOpt.isPresent() || !accServerOpt.isPresent()) {
+                logger.warn("[TPA] requester lub accepter nie ma currentServer ({} / {})",
+                        requester.getUsername(), accepter.getUsername());
+                return;
+            }
+
+            String reqServerName = reqServerOpt.get().getServerInfo().getName();
+            String accServerName = accServerOpt.get().getServerInfo().getName();
+
+            // 1) Ten sam serwer -> teleport lokalny (stary kanał zostaje)
+            if (reqServerName.equals(accServerName)) {
+                logger.info("[TPA] Gracze {} i {} są na tym samym serwerze ({}). Zlecam teleport lokalny.",
+                        requester.getUsername(), accepter.getUsername(), reqServerName);
+
                 try (Jedis jedis = redisManager.getJedis()) {
                     JsonObject localTpData = new JsonObject();
                     localTpData.addProperty("playerToTeleportName", requester.getUsername());
                     localTpData.add("targetLocation", data.getAsJsonObject("location"));
                     jedis.publish("aisector:tp_execute_local_tpa", localTpData.toString());
                 }
-            } else {
-                logger.info("[TPA] Gracze " + requester.getUsername() + " i " + accepter.getUsername() + " są na różnych serwerach. Zlecam warmup.");
-                try (Jedis jedis = redisManager.getJedis()) {
-                    JsonObject warmupData = new JsonObject();
-                    warmupData.addProperty("requesterName", requester.getUsername());
-                    warmupData.add("targetLocation", data.getAsJsonObject("location"));
-                    warmupData.addProperty("targetServerName", accepter.getCurrentServer().get().getServerInfo().getName());
-                    jedis.publish("aisector:tpa_initiate_warmup", warmupData.toString());
-                }
+
+                accepter.sendMessage(Component.text("§aZaakceptowałeś prośbę od §e" + requester.getUsername()));
+                requester.sendMessage(Component.text("§aGracz §e" + accepter.getUsername() + " §azaakceptował Twoją prośbę."));
+                return;
             }
+
+            // 2) Różne serwery -> warmup (NOWY kanał aisector:packet)
+            logger.info("[TPA] Gracze {} ({}) i {} ({}) są na różnych serwerach. Zlecam warmup pakietem.",
+                    requester.getUsername(), reqServerName, accepter.getUsername(), accServerName);
+
+            JsonObject loc = data.getAsJsonObject("location");
+            if (loc == null) {
+                logger.warn("[TPA] Brak pola location w payloadzie tpa_accept");
+                return;
+            }
+
+            try (Jedis jedis = redisManager.getJedis()) {
+                TpaInitiateWarmupPacket p = new TpaInitiateWarmupPacket();
+                p.requesterName = requester.getUsername();
+                p.targetServerName = accServerName;
+
+                p.world = loc.get("world").getAsString();
+                p.x = loc.get("x").getAsDouble();
+                p.y = loc.get("y").getAsDouble();
+                p.z = loc.get("z").getAsDouble();
+                p.yaw = loc.get("yaw").getAsFloat();
+                p.pitch = loc.get("pitch").getAsFloat();
+
+                JsonCodec<TpaInitiateWarmupPacket> codec = new JsonCodec<>(TpaInitiateWarmupPacket.class);
+                String payloadJson = codec.encode(p);
+
+                new RedisPacketPublisher().publish(jedis, "aisector:packet", p, payloadJson);
+            }
+
             accepter.sendMessage(Component.text("§aZaakceptowałeś prośbę od §e" + requester.getUsername()));
             requester.sendMessage(Component.text("§aGracz §e" + accepter.getUsername() + " §azaakceptował Twoją prośbę."));
         });
     }
+
 
     private void initiateTransferWithDataSave(Player playerToTransfer, RegisteredServer destinationServer) {
         try (Jedis jedis = redisManager.getJedis()) {
