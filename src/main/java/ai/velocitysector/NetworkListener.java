@@ -100,7 +100,11 @@ public abstract class NetworkListener extends JedisPubSub {
         Optional<Player> targetOpt = proxy.getPlayer(targetName);
         if (!targetOpt.isPresent()) {
             proxy.getPlayer(UUID.fromString(adminUUID)).ifPresent(admin ->
-                    admin.sendMessage(Component.text("§cGracz o nicku '" + targetName + "' nie jest online.")));
+                    admin.sendMessage(
+                            r("Gracz o nicku '")
+                                    .append(y(targetName))
+                                    .append(r("' nie jest online."))
+                    ));
             return;
         }
 
@@ -123,7 +127,9 @@ public abstract class NetworkListener extends JedisPubSub {
         Optional<RegisteredServer> targetServerOpt = proxy.getServer(targetServerName);
 
         if (!targetServerOpt.isPresent()) {
-            adminOpt.get().sendMessage(Component.text("§cWystąpił błąd: Serwer docelowy nie istnieje."));
+            adminOpt.get().sendMessage(
+                    r("Wystąpił błąd: Serwer docelowy nie istnieje.")
+            );
             return;
         }
 
@@ -177,11 +183,13 @@ public abstract class NetworkListener extends JedisPubSub {
 
 
         target.sendMessage(
-                g("Gracz ").append(y(requester.getUsername()))
-                        .append(g(" chce się do Ciebie przeteleportować. Wpisz "))
-                        .append(Component.text("/tpaccept", NamedTextColor.GREEN)
-                                .clickEvent(ClickEvent.runCommand("/tpaccept")))
-        );
+                prefixTpa()
+                        .append(g("Gracz ").append(y(requester.getUsername()))
+                                .append(g(" chce się do Ciebie przeteleportować. Wpisz "))
+                                .append(gr("/tpaccept")
+                                        .clickEvent(ClickEvent.runCommand("/tpaccept")))
+                        ));
+
     }
 
 
@@ -195,7 +203,10 @@ public abstract class NetworkListener extends JedisPubSub {
 
         UUID requesterUuid = tpaRequests.remove(accepter.getUniqueId());
         if (requesterUuid == null) {
-            accepter.sendMessage(Component.text("§cNie masz żadnych oczekujących próśb."));
+            accepter.sendMessage(
+                    r("Nie masz żadnych oczekujących próśb.")
+            );
+
             return;
         }
 
@@ -238,8 +249,17 @@ public abstract class NetworkListener extends JedisPubSub {
 
                 }
 
-                accepter.sendMessage(Component.text("§aZaakceptowałeś prośbę od §e" + requester.getUsername()));
-                requester.sendMessage(Component.text("§aGracz §e" + accepter.getUsername() + " §azaakceptował Twoją prośbę."));
+                accepter.sendMessage(
+                        gr("Zaakceptowałeś prośbę od ")
+                                .append(y(requester.getUsername()))
+                );
+
+                requester.sendMessage(
+                        gr("Gracz ")
+                                .append(y(accepter.getUsername()))
+                                .append(gr(" zaakceptował Twoją prośbę."))
+                );
+
                 return;
             }
 
@@ -271,8 +291,17 @@ public abstract class NetworkListener extends JedisPubSub {
                 new RedisPacketPublisher().publish(jedis, "aisector:packet", p, payloadJson);
             }
 
-            accepter.sendMessage(Component.text("§aZaakceptowałeś prośbę od §e" + requester.getUsername()));
-            requester.sendMessage(Component.text("§aGracz §e" + accepter.getUsername() + " §azaakceptował Twoją prośbę."));
+            accepter.sendMessage(
+                    gr("Zaakceptowałeś prośbę od ")
+                            .append(y(requester.getUsername()))
+            );
+
+            requester.sendMessage(
+                    gr("Gracz ")
+                            .append(y(accepter.getUsername()))
+                            .append(gr(" zaakceptował Twoją prośbę."))
+            );
+
         });
     }
 
@@ -297,7 +326,12 @@ public abstract class NetworkListener extends JedisPubSub {
 
         if (!adminOpt.isPresent() || !targetOpt.isPresent()) {
             proxy.getPlayer(UUID.fromString(adminUUID)).ifPresent(admin ->
-                    admin.sendMessage(Component.text("§cGracz o nicku '" + targetName + "' nie jest online.")));
+                    admin.sendMessage(
+                            r("Gracz o nicku '")
+                                    .append(y(targetName))
+                                    .append(r("' nie jest online."))
+                    ));
+
             return;
         }
 
@@ -433,6 +467,11 @@ public abstract class NetworkListener extends JedisPubSub {
 
     private Component gr(String s) { // green
         return Component.text(s, NamedTextColor.GREEN);
+    }
+    private Component prefixTpa() {
+        return g("[")
+                .append(gr("TPA"))
+                .append(g("] "));
     }
 
 
