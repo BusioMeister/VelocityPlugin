@@ -1,8 +1,6 @@
 package ai.velocitysector;
 
-import ai.velocitysector.redis.packet.JsonCodec;
-import ai.velocitysector.redis.packet.RedisPacketPublisher;
-import ai.velocitysector.redis.packet.TpaInitiateWarmupPacket;
+import ai.velocitysector.redis.packet.*;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -13,6 +11,7 @@ import com.velocitypowered.api.proxy.server.RegisteredServer;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bson.Document;
 import org.slf4j.Logger;
 import redis.clients.jedis.Jedis;
@@ -45,6 +44,14 @@ public abstract class NetworkListener extends JedisPubSub {
         this.tpaRequests = tpaRequests;
         this.logger = logger;
     }
+
+    private static final LegacyComponentSerializer LEGACY =
+            LegacyComponentSerializer.legacySection();
+
+    private Component lc(String msg) {
+        return LEGACY.deserialize(msg);
+    }
+
 
     @Override
     public void onMessage(String channel, String message) {
@@ -148,15 +155,35 @@ public abstract class NetworkListener extends JedisPubSub {
         Optional<Player> targetOpt = proxy.getPlayer(targetName);
         if (!requesterOpt.isPresent() || !targetOpt.isPresent()) {
             logger.warn("[TPA] Nie znaleziono gracza wysyłającego lub docelowego.");
+
+            // powiadom requestera (jeśli istnieje)
+            if (requesterOpt.isPresent()) {
+                sendMessageToPlayer(requesterName, "§cGracz o nicku '" + targetName + "' nie jest online w sieci.");
+            }
+            // opcjonalnie: jeśli requester nie istnieje, to i tak nic nie wyślesz
+
             return;
         }
+        if (requesterName.equalsIgnoreCase(targetName)) {
+            sendMessageToPlayer(requesterName, "§cNie możesz wysłać prośby do samego siebie.");
+            return;
+        }
+
         Player requester = requesterOpt.get();
         Player target = targetOpt.get();
         tpaRequests.put(target.getUniqueId(), requester.getUniqueId());
         logger.info("[TPA] Dodano prośbę od " + requester.getUsername() + " do " + target.getUsername() + ". Mapa próśb: " + tpaRequests);
-        requester.sendMessage(Component.text("§7Wysłano prośbę o teleportację do gracza §e" + target.getUsername()));
-        target.sendMessage(Component.text("§7Gracz §e" + requester.getUsername() + " §7chce się do Ciebie przeteleportować. Wpisz ").append(Component.text("/tpaccept", NamedTextColor.GREEN).clickEvent(ClickEvent.runCommand("/tpaccept"))));
+        requester.sendMessage(g("Wysłano prośbę o teleportację do gracza ").append(y(target.getUsername())));
+
+
+        target.sendMessage(
+                g("Gracz ").append(y(requester.getUsername()))
+                        .append(g(" chce się do Ciebie przeteleportować. Wpisz "))
+                        .append(Component.text("/tpaccept", NamedTextColor.GREEN)
+                                .clickEvent(ClickEvent.runCommand("/tpaccept")))
+        );
     }
+
 
     private void handleTpaAccept(JsonObject data) {
         String accepterName = data.get("accepter").getAsString();
@@ -191,10 +218,24 @@ public abstract class NetworkListener extends JedisPubSub {
                         requester.getUsername(), accepter.getUsername(), reqServerName);
 
                 try (Jedis jedis = redisManager.getJedis()) {
-                    JsonObject localTpData = new JsonObject();
-                    localTpData.addProperty("playerToTeleportName", requester.getUsername());
-                    localTpData.add("targetLocation", data.getAsJsonObject("location"));
-                    jedis.publish("aisector:tp_execute_local_tpa", localTpData.toString());
+                    JsonObject loc = data.getAsJsonObject("location");
+                    if (loc == null) return;
+
+                    LocalTpaTeleportPacket p = new LocalTpaTeleportPacket();
+                    p.playerToTeleportName = requester.getUsername();
+                    p.world = loc.get("world").getAsString();
+                    p.x = loc.get("x").getAsDouble();
+                    p.y = loc.get("y").getAsDouble();
+                    p.z = loc.get("z").getAsDouble();
+                    p.yaw = loc.get("yaw").getAsFloat();
+                    p.pitch = loc.get("pitch").getAsFloat();
+                    p.message = "§aZostałeś przeteleportowany.";
+
+                    JsonCodec<LocalTpaTeleportPacket> codec = new JsonCodec<>(LocalTpaTeleportPacket.class);
+                    String payloadJson = codec.encode(p);
+                    new RedisPacketPublisher().publish(jedis, "aisector:packet", p, payloadJson);
+
+
                 }
 
                 accepter.sendMessage(Component.text("§aZaakceptowałeś prośbę od §e" + requester.getUsername()));
@@ -365,10 +406,34 @@ public abstract class NetworkListener extends JedisPubSub {
 
     private void sendMessageToPlayer(String playerName, String message) {
         try (Jedis jedis = redisManager.getJedis()) {
+
+            // NEW
+            SendMessagePacket p = new SendMessagePacket(playerName, message);
+            JsonCodec<SendMessagePacket> codec = new JsonCodec<>(SendMessagePacket.class);
+            new RedisPacketPublisher().publish(jedis, "aisector:packet", p, codec.encode(p));
+
+            // OLD (tymczasowo)
             JsonObject msgData = new JsonObject();
             msgData.addProperty("playerName", playerName);
             msgData.addProperty("message", message);
-            jedis.publish("aisector:send_message", msgData.toString());
+            //jedis.publish("aisector:send_message", msgData.toString());
         }
     }
+    private Component g(String s) { // gray
+        return Component.text(s, NamedTextColor.GRAY);
+    }
+
+    private Component y(String s) { // yellow
+        return Component.text(s, NamedTextColor.YELLOW);
+    }
+
+    private Component r(String s) { // red
+        return Component.text(s, NamedTextColor.RED);
+    }
+
+    private Component gr(String s) { // green
+        return Component.text(s, NamedTextColor.GREEN);
+    }
+
+
 }
