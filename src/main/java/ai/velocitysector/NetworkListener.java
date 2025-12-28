@@ -70,7 +70,6 @@ public abstract class NetworkListener extends JedisPubSub {
         }
 
         if (channel.equals("aisector:packet")) {
-            // w NetworkListener#onMessage, w bloku: if (channel.equals("aisectorpacket")) { ... }
 
             PacketEnvelope env = gson.fromJson(message, PacketEnvelope.class);
 
@@ -98,7 +97,7 @@ public abstract class NetworkListener extends JedisPubSub {
                     }
 
                     // publikujemy NA OSOBNY KANAŁ per-serwer, którego słuchają spigoty
-                    String serverChannel = "aisectorpacket:" + targetServer;
+                    String serverChannel = "aisector:packet:" + targetServer;
                     logger.info("TAG-FWD viewer={} -> channel={}", viewer.getUsername(), serverChannel);
 
                     try (Jedis jedis = redisManager.getJedis()) {
