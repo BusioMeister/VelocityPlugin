@@ -57,7 +57,7 @@ public class VelocityPlugin {
                 "aisector:sektor_request", "aisector:send_request", "aisector:sector_stats",
                 "aisector:gui_data_request", "aisector:invsee_request", "aisector:admin_tp_request",
                 "aisector:admin_location_response", "player:force_sector_spawn:", "aisector:ban_broadcast",
-                "aisector:ban_kick"
+                "aisector:ban_kick","aisector:packet"
         );
 
 

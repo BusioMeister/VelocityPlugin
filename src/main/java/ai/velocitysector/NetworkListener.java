@@ -69,8 +69,50 @@ public abstract class NetworkListener extends JedisPubSub {
             return;
         }
 
+        if (channel.equals("aisector:packet")) {
+            // w NetworkListener#onMessage, w bloku: if (channel.equals("aisectorpacket")) { ... }
 
-        // --- POSPRZĄTANA I UJEDNOLICONA SEKCJA DLA KOMEND TP ---
+            PacketEnvelope env = gson.fromJson(message, PacketEnvelope.class);
+
+            if (env.id == GuildTagUpdatePacket.ID) {
+                JsonCodec<GuildTagUpdatePacket> codec = new JsonCodec<>(GuildTagUpdatePacket.class);
+                GuildTagUpdatePacket pkt = codec.decode(env.payload);
+
+                UUID viewerId;
+                try {
+                    viewerId = UUID.fromString(pkt.viewerUuid);
+                } catch (Exception e) {
+                    logger.warn("GuildTagUpdatePacket: invalid viewerUuid={}", pkt.viewerUuid);
+                    return;
+                }
+
+                proxy.getPlayer(viewerId).ifPresentOrElse(viewer -> {
+                    // serwer na którym aktualnie jest viewer (tam trzeba wykonać scoreboard/team)
+                    String targetServer = viewer.getCurrentServer()
+                            .map(sc -> sc.getServerInfo().getName())
+                            .orElse(null);
+
+                    if (targetServer == null) {
+                        logger.warn("GuildTagUpdatePacket: viewer {} has no current server", viewer.getUsername());
+                        return;
+                    }
+
+                    // publikujemy NA OSOBNY KANAŁ per-serwer, którego słuchają spigoty
+                    String serverChannel = "aisectorpacket:" + targetServer;
+                    logger.info("TAG-FWD viewer={} -> channel={}", viewer.getUsername(), serverChannel);
+
+                    try (Jedis jedis = redisManager.getJedis()) {
+                        jedis.publish(serverChannel, gson.toJson(env));
+                    } catch (Exception e) {
+                        logger.error("GuildTagUpdatePacket: publish failed to {}", serverChannel, e);
+                    }
+                }, () -> logger.warn("GuildTagUpdatePacket: viewer not online uuid={}", viewerId));
+
+                return; // ważne: kończymy obsługę tego pakietu
+            }
+        }
+
+            // --- POSPRZĄTANA I UJEDNOLICONA SEKCJA DLA KOMEND TP ---
         if (channel.equals("aisector:admin_tp_request")) {
             handleAdminTeleportRequest(data);
         } else if (channel.equals("aisector:admin_location_response")) {
@@ -113,6 +155,7 @@ public abstract class NetworkListener extends JedisPubSub {
             logger.info("[TP] Wysyłam prośbę o lokalizację gracza {} dla admina {}", targetName, adminUUID);
         }
     }
+
 
     // Metoda, która kończy proces teleportacji po otrzymaniu lokalizacji
     private void handleLocationResponseAndTransfer(JsonObject data) {
@@ -306,6 +349,7 @@ public abstract class NetworkListener extends JedisPubSub {
     }
 
 
+
     private void initiateTransferWithDataSave(Player playerToTransfer, RegisteredServer destinationServer) {
         try (Jedis jedis = redisManager.getJedis()) {
             JsonObject saveDataRequest = new JsonObject();
@@ -438,6 +482,8 @@ public abstract class NetworkListener extends JedisPubSub {
         }
     }
 
+
+
     private void sendMessageToPlayer(String playerName, String message) {
         try (Jedis jedis = redisManager.getJedis()) {
 
@@ -451,7 +497,9 @@ public abstract class NetworkListener extends JedisPubSub {
             msgData.addProperty("playerName", playerName);
             msgData.addProperty("message", message);
             //jedis.publish("aisector:send_message", msgData.toString());
+
         }
+
     }
     private Component g(String s) { // gray
         return Component.text(s, NamedTextColor.GRAY);
