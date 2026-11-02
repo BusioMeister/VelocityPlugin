@@ -1,13 +1,13 @@
-package ai.velocitysector;
+package ai.aisector.shared.packet;
 
-import ai.velocitysector.redis.packet.Packet;
+import ai.aisector.shared.Packet;
 
 public final class GuildTagUpdatePacket implements Packet {
-
     public static final int ID = 10;
+    public String viewerUuid;
+    public String[] playerData;
 
-    public final String viewerUuid;
-    public final String[] playerData;
+    public GuildTagUpdatePacket() { }
 
     public GuildTagUpdatePacket(String viewerUuid, String[] playerData) {
         this.viewerUuid = viewerUuid;
@@ -15,7 +15,5 @@ public final class GuildTagUpdatePacket implements Packet {
     }
 
     @Override
-    public int id() {
-        return ID;
-    }
+    public int id() { return ID; }
 }

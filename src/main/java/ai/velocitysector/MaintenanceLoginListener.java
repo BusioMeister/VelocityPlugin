@@ -1,32 +1,40 @@
 package ai.velocitysector;
 
+import com.velocitypowered.api.event.EventTask;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.LoginEvent;
 import net.kyori.adventure.text.Component;
-import redis.clients.jedis.Jedis;
+import org.slf4j.Logger;
+import java.util.concurrent.TimeUnit;
 
-public class MaintenanceLoginListener {
+public final class MaintenanceLoginListener {
     private final RedisManager redis;
-    public MaintenanceLoginListener(RedisManager redis) { this.redis = redis; }
+    private final Logger logger;
+
+    public MaintenanceLoginListener(RedisManager redis, Logger logger) {
+        this.redis = redis;
+        this.logger = logger;
+    }
 
     @Subscribe
-    public void onLogin(LoginEvent event) {
-        boolean enabled;
-        try (Jedis j = redis.getJedis()) { enabled = Boolean.TRUE.equals(j.exists("maintenance:enabled")); }
-        catch (Exception e) { enabled = false; }
-        if (!enabled) return;
-
-        if (event.getPlayer().hasPermission("aisector.maintenance.bypass")) return;
-
-        boolean allowed = false;
-        try (Jedis j = redis.getJedis()) {
-            allowed = Boolean.TRUE.equals(j.sismember("whitelist:players", event.getPlayer().getUniqueId().toString()));
-        } catch (Exception ignored) {}
-
-        if (!allowed) {
-            event.setResult(LoginEvent.ComponentResult.denied(
-                    Component.text("§cPrzerwa techniczna\n§7Whitelista jest włączona.")
-            ));
+    public EventTask onLogin(LoginEvent event) {
+        if (event.getPlayer().hasPermission("aisector.maintenance.bypass")) {
+            return EventTask.async(() -> { });
         }
+
+        String uuid = event.getPlayer().getUniqueId().toString();
+        return EventTask.withContinuation(continuation -> redis.executeAsync(jedis -> {
+            if (!Boolean.TRUE.equals(jedis.exists("maintenance:enabled"))) return false;
+            return !Boolean.TRUE.equals(jedis.sismember("whitelist:players", uuid));
+        }).orTimeout(4, TimeUnit.SECONDS).whenComplete((deny, error) -> {
+            if (error != null) {
+                logger.warn("Could not verify maintenance whitelist during login; allowing connection: {}",
+                        error.getMessage());
+            } else if (Boolean.TRUE.equals(deny)) {
+                event.setResult(LoginEvent.ComponentResult.denied(
+                        Component.text("§cPrzerwa techniczna\n§7Whitelista jest włączona.")));
+            }
+            continuation.resume();
+        }));
     }
 }

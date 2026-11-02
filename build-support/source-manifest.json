@@ -1,0 +1,23 @@
+{
+  "build-support/pom.xml": "b272c3b024c6cec7666c8afb8d30ea26cf46311f0c4e7ab7fb14f82592155437",
+  "build-support/shared/pom.xml": "bbabdeaf999ad5b84858982997eb3ec3f43efc2cee6ffb38ac32762df89322f3",
+  "build-support/shared/src/main/java/ai/aisector/shared/database/BsonSnapshot.java": "5ddc57951a11ec047953b9f65ee0ebf92dd06ca944fb40154c71f61066150fca",
+  "build-support/shared/src/main/java/ai/aisector/shared/database/MongoDatabaseManager.java": "d4c07f62607e942a23d53e6d6634e0705b6729e5ca82cfff36562951c21ac1c0",
+  "build-support/shared/src/main/java/ai/aisector/shared/NetworkAddressUtil.java": "f706be6e44c0fdb116027adc4f153c3de36852e3952c1bb8867944056e9fb420",
+  "build-support/shared/src/main/java/ai/aisector/shared/packet/AlertPacket.java": "6572cccdc1daabd004dcc8eabf2fbb67065c9f13190adc66f0b21279eab739a1",
+  "build-support/shared/src/main/java/ai/aisector/shared/packet/GuildTagUpdatePacket.java": "4962b47d209941a0380203e53d2aff72db3b2bf6fbe1d164653a199803a849f5",
+  "build-support/shared/src/main/java/ai/aisector/shared/packet/LocalTpaTeleportPacket.java": "33cb0abc7e390d608aa39af8327acb0fc12e8c5b520bb9d88a96a70809aabe7d",
+  "build-support/shared/src/main/java/ai/aisector/shared/packet/SendMessagePacket.java": "bd8b074324f0ab279a4d78f7c57f7d97e2ce356c539352a9d83fe607a8a90058",
+  "build-support/shared/src/main/java/ai/aisector/shared/packet/TpaInitiateWarmupPacket.java": "82bf00237238d6bb0cc9e5b28ccab1a13988366b5426c9d01584c13ba3d8469d",
+  "build-support/shared/src/main/java/ai/aisector/shared/Packet.java": "fecd2dc97199fb8a032ed10a075b0d49c1821b726f919a795965f2fb754e1592",
+  "build-support/shared/src/main/java/ai/aisector/shared/PacketEnvelope.java": "3881e709b5202ccf7b85da757725dffd9e73af6785cefb2ac7577b6d97f063c4",
+  "build-support/shared/src/main/java/ai/aisector/shared/RedisChannels.java": "c561b2c778fe1b3fe0633a8e582e493b10f7522158f7e9ffe3a0c86486122c28",
+  "build-support/shared/src/main/java/ai/aisector/shared/TransferSaveRequest.java": "e32c8f9d5487164d089903e07f4731d77870ab443efcb61adce9a7c1964c7292",
+  "build-support/shared/src/test/java/ai/aisector/shared/database/BsonSnapshotTest.java": "cc3f6c8f0d932026f5547159df388fd089ef9d4df9369292001f28f3a87a5464",
+  "build-support/shared/src/test/java/ai/aisector/shared/NetworkAddressUtilTest.java": "4adce3340544c799ddba01694797dfcf13c524181a83ef73d17e97a27bd7ac07",
+  "build-support/shared/src/test/java/ai/aisector/shared/RedisChannelsTest.java": "0838dd25dbb2b8bbec31108072318b36be15396c13ea5427f5a887a410b6b7fb",
+  "build-support/shared/src/test/java/ai/aisector/shared/TransferSaveRequestTest.java": "3f6cc7fbdfd616217267a6fb9814812876552d4bbafb0d3d7d80ed7a8c1b2211",
+  "mvnw": "cae96cef89ebea3531221f4ae17c23cf8edf67d00eae8306d4186ae1bbed4d02",
+  "mvnw.cmd": "4a361e1374a3e5ad6d03e18e9adc0cf181ac5058ac6203b76f0ba3b456b56481",
+  ".mvn/wrapper/maven-wrapper.properties": "8f2a4438810348270d9d98f8d6d530541ddb7271e373db207e8ac381e0e35b62"
+}

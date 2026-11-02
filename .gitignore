@@ -111,3 +111,9 @@ buildNumber.properties
 
 # Common working directory
 run/
+
+# Local database snapshots and credentials are never release inputs.
+*.rdb
+.env
+.env.*
+!.env.example

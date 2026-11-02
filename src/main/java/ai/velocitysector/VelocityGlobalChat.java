@@ -26,6 +26,9 @@ public class VelocityGlobalChat {
         if (!event.getIdentifier().equals(CHANNEL)) {
             return;
         }
+        // This is a server-only channel. Consume player-originated packets too,
+        // otherwise Velocity's default forwarding lets clients forge backend chat.
+        event.setResult(PluginMessageEvent.ForwardResult.handled());
 
         // Upewniamy się, że źródłem jest serwer gry
         if (!(event.getSource() instanceof ServerConnection)) {
@@ -34,6 +37,11 @@ public class VelocityGlobalChat {
 
         // Pobieramy surowe dane wiadomości
         byte[] data = event.getData();
+        if (data == null || !isValidPayloadLength(data.length)) {
+            logger.debug("Odrzucono nieprawidłowy payload globalnego czatu ({} bytes)",
+                    data == null ? "null" : data.length);
+            return;
+        }
 
         // 🔥 KLUCZOWA POPRAWKA: Rozsyłamy wiadomość do WSZYSTKICH serwerów w sieci 🔥
         // Zamiast wysyłać do graczy, przekazujemy wiadomość dalej do serwerów.
@@ -43,6 +51,10 @@ public class VelocityGlobalChat {
             server.sendPluginMessage(CHANNEL, data);
         }
 
-        logger.info("Przekazano wiadomość z globalnego czatu do wszystkich serwerów.");
+        logger.debug("Przekazano wiadomość z globalnego czatu do wszystkich serwerów.");
+    }
+
+    static boolean isValidPayloadLength(int length) {
+        return length >= 2 && length <= 32_767;
     }
 }

@@ -5,8 +5,6 @@ import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import net.kyori.adventure.text.Component;
-import redis.clients.jedis.Jedis;
-
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -52,26 +50,36 @@ public class ReplyCommand implements SimpleCommand {
         }
         Player target = targetOptional.get();
 
-        // ReplyCommand.execute — przed sprawdzeniem targetDisabled
-        boolean senderBypass = sender.hasPermission("aisector.wyjebane.bypass");
-        if (!senderBypass) {
-            try (redis.clients.jedis.Jedis j = redisManager.getJedis()) {
-                senderBypass = j.exists("bypass_pm:" + sender.getUniqueId());
-            }
+        String message = String.join(" ", args);
+        if (message.isBlank() || message.length() > 2_048) {
+            sender.sendMessage(Component.text("§cWiadomość musi mieć od 1 do 2048 znaków."));
+            return;
         }
-
-        try (redis.clients.jedis.Jedis j = redisManager.getJedis()) {
-            boolean targetDisabled = j.exists("pm_disabled:" + target.getUniqueId());
-            if (targetDisabled && !senderBypass) {
+        UUID senderUuid = sender.getUniqueId();
+        boolean permissionBypass = sender.hasPermission("aisector.wyjebane.bypass");
+        redisManager.executeAsync(jedis -> {
+            boolean senderBypass = permissionBypass || jedis.exists("bypass_pm:" + sender.getUniqueId());
+            boolean targetDisabled = jedis.exists("pm_disabled:" + target.getUniqueId());
+            return targetDisabled && !senderBypass;
+        }).whenComplete((targetDisabled, error) -> {
+            Player currentSender = proxy.getPlayer(senderUuid).orElse(null);
+            if (currentSender != sender) return;
+            if (error != null) {
+                sender.sendMessage(Component.text("§cNie udało się sprawdzić ustawień prywatnych wiadomości."));
+                return;
+            }
+            if (Boolean.TRUE.equals(targetDisabled)) {
                 sender.sendMessage(Component.text("§cTen gracz ma wyłączone prywatne wiadomości."));
                 return;
             }
-        }
-
-
-        String message = String.join(" ", args);
-        target.sendMessage(Component.text("§3" + sender.getUsername() + "§b -> Ja §b" + message));
-        sender.sendMessage(Component.text("§3 Ja -> " + target.getUsername() + " §b" + message));
+            Player currentTarget = proxy.getPlayer(targetUuid).orElse(null);
+            if (currentTarget == null || currentTarget != target) {
+                sender.sendMessage(Component.text("§cGracz, któremu próbujesz odpowiedzieć, jest offline."));
+                return;
+            }
+            currentTarget.sendMessage(Component.text("§3" + sender.getUsername() + "§b -> Ja §b" + message));
+            currentSender.sendMessage(Component.text("§3 Ja -> " + currentTarget.getUsername() + " §b" + message));
+        });
     }
 
     @Override
