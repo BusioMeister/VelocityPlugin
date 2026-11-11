@@ -1,5 +1,7 @@
 # aiSector-Velocity
 
+**Kompletny workspace (shared, audytory, źródła testów runtime i dokumentacja):** [aiSector/WORKSPACE.md](https://github.com/BusioMeister/aiSector/blob/master/WORKSPACE.md). Kod proxy i jego unit tests są w `src/`, wspólne źródła do samodzielnego buildu w `build-support/shared/`.
+
 ## Rewrite 2.0 — 2026-11-02
 
 Velocity **4.3.1**, Java **25**. Backend: [aiSector](https://github.com/BusioMeister/aiSector).
