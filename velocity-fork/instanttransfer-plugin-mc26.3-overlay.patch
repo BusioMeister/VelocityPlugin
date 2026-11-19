@@ -1,3 +1,15 @@
+diff --git a/backend-agent/spigot/src/main/java/fr/cupcode/instanttransfer/agent/AgentPlugin.java b/backend-agent/spigot/src/main/java/fr/cupcode/instanttransfer/agent/AgentPlugin.java
+index 79ccf93..663c032 100644
+--- a/backend-agent/spigot/src/main/java/fr/cupcode/instanttransfer/agent/AgentPlugin.java
++++ b/backend-agent/spigot/src/main/java/fr/cupcode/instanttransfer/agent/AgentPlugin.java
+@@ -149,7 +149,6 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
+                 try {
+                     UUID uuid = UUID.fromString(parts[0]);
+                     String fromServer = parts[1];
+-                    new AgentAPI().grantArrivalFlight(uuid, (int) ConfigValue.getFallGraceTicks());
+                     EventFire.firePlayerArrive(uuid, fromServer);
+                 } catch (IllegalArgumentException e) {
+                     getLogger().warning("[COORD] bad arrival payload: " + msg + " - " + e.getMessage());
 diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
 index 2451689..870d487 100644
 --- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
@@ -51,10 +63,22 @@ index 2451689..870d487 100644
              logger.warn("[InstantTransfer] bad ids payload: {}", payload);
              return;
 diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
-index 8849cc2..500e46b 100644
+index 8849cc2..1a8577e 100644
 --- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
 +++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
-@@ -197,6 +197,8 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -104,7 +104,10 @@ public final class SeamlessPacketListener implements PacketListener {
+             PacketType.Play.Server.PLAYER_POSITION_AND_LOOK);
+ 
+     private static final EnumSet<PacketType.Play.Client> RECEIVE_TRACKED = EnumSet.of(
+-            PacketType.Play.Client.CLOSE_WINDOW);
++            PacketType.Play.Client.CLOSE_WINDOW, PacketType.Play.Client.TELEPORT_CONFIRM,
++            PacketType.Play.Client.PLAYER_POSITION, PacketType.Play.Client.PLAYER_POSITION_AND_ROTATION,
++            PacketType.Play.Client.PLAYER_ROTATION, PacketType.Play.Client.PLAYER_FLYING,
++            PacketType.Play.Client.VEHICLE_MOVE);
+ 
+     private final SwitchManager manager;
+     private final CoordManager coord;
+@@ -197,6 +200,8 @@ public final class SeamlessPacketListener implements PacketListener {
                      cz = SwitchState.chunkZ(key);
                      if (config.debug() && state.nextChunkPeekCheck() < 10) {
                          key = verifyChunkPeek(event, user, key, body, state); // sanity + offset self-heal
@@ -63,7 +87,7 @@ index 8849cc2..500e46b 100644
                      }
                  } else {
                      // Unknown slicing/era: pay the wrapper cost rather than lose tracking accuracy.
-@@ -224,6 +226,11 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -224,6 +229,11 @@ public final class SeamlessPacketListener implements PacketListener {
                  // forward none); it defines the entity id the client keeps for its whole session.
                  WrapperPlayServerJoinGame w = new WrapperPlayServerJoinGame(event);
                  state.entityIds(w.getEntityId(), w.getEntityId());
@@ -75,7 +99,23 @@ index 8849cc2..500e46b 100644
                  state.clientDimension(dimensionKey(w.getDimensionTypeRef(),
                          state.adapter(() -> ProtocolAdapter.forClientVersion(user.getClientVersion()))));
                  state.markNewServerTalking(); // safety: patch disabled → vanilla switch path
-@@ -387,20 +394,12 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -375,11 +385,15 @@ public final class SeamlessPacketListener implements PacketListener {
+                 state.ghostWindowId(-1);
+ 
+             } else if (type == PacketType.Play.Server.PLAYER_ABILITIES) {
++                syncPendingGamemode(user, state);
+                 WrapperPlayServerPlayerAbilities w = new WrapperPlayServerPlayerAbilities(event);
+                 state.rememberAbilities(w.isInGodMode(), w.isFlying(), w.isFlightAllowed(),
+                         w.isInCreativeMode(), w.getFlySpeed(), w.getFOVModifier());
+ 
+             } else if (type == PacketType.Play.Server.PLAYER_POSITION_AND_LOOK) {
++                if (state.waitingForArrivalAck()) {
++                    state.awaitArrivalAck(new WrapperPlayServerPlayerPositionAndLook(event).getTeleportId());
++                }
+                 // Self teleport: bound tracking memory (spec P4) — scan only when meaningfully large.
+                 if (state.loadedChunks().size() > 1024) {
+                     WrapperPlayServerPlayerPositionAndLook w =
+@@ -387,20 +401,12 @@ public final class SeamlessPacketListener implements PacketListener {
                      LoadedChunkPruner.prune(state.loadedChunks(),
                              (int) Math.floor(w.getX()) >> 4, (int) Math.floor(w.getZ()) >> 4, 32);
                  }
@@ -97,7 +137,24 @@ index 8849cc2..500e46b 100644
          } catch (Exception e) {
              if (config.debug()) {
                  logger.warn("[InstantTransfer] listener error on {}: {}", type, e.toString());
-@@ -459,6 +458,7 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -420,6 +426,16 @@ public final class SeamlessPacketListener implements PacketListener {
+         if (state.suppressListener()) {
+             return;
+         }
++        if (pc != PacketType.Play.Client.CLOSE_WINDOW) {
++            if (!state.waitingForArrivalAck()) return;
++            if (pc == PacketType.Play.Client.TELEPORT_CONFIRM) {
++                state.acknowledgeArrival(new com.github.retrooper.packetevents.wrapper.play.client
++                        .WrapperPlayClientTeleportConfirm(event).getTeleportId());
++            } else {
++                event.setCancelled(true);
++            }
++            return;
++        }
+         // The player closed the GUI themselves (ESC also closes the old server's window mid-switch).
+         int windowId = new WrapperPlayClientCloseWindow(event).getWindowId();
+         if (windowId == state.openWindowId()) {
+@@ -459,6 +475,7 @@ public final class SeamlessPacketListener implements PacketListener {
          }
          // Cross-dimension: the client rebuilt its level from scratch; nothing old survives.
          // (Scoreboard tracking is intentionally kept: it is connection-scoped client-side.)
@@ -105,7 +162,7 @@ index 8849cc2..500e46b 100644
          state.loadedChunks().clear();
          state.trackedEntities().clear();
          state.ghostEntities().clear();
-@@ -599,13 +599,22 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -599,13 +616,25 @@ public final class SeamlessPacketListener implements PacketListener {
       */
      private void onArrivalTeleport(PacketSendEvent event, User user, SwitchState state) {
          WrapperPlayServerPlayerPositionAndLook w = new WrapperPlayServerPlayerPositionAndLook(event);
@@ -115,9 +172,12 @@ index 8849cc2..500e46b 100644
 +            long generation = state.switchGeneration();
 +            var channel = (io.netty.channel.Channel) user.getChannel();
 +            channel.eventLoop().schedule(() -> {
-+                if (channel.isActive() && state.switchGeneration() == generation && state.guardActive()) {
-+                    fireTransferTimeout(user);
-+                    release(user, state, "arrival wait expired; no position correction");
++                if (channel.isActive() && state.switchGeneration() == generation) {
++                    state.stopWaitingForArrivalAck();
++                    if (state.guardActive()) {
++                        fireTransferTimeout(user);
++                        release(user, state, "arrival wait expired; no position correction");
++                    }
 +                }
 +            }, config.guardTimeoutMs(), java.util.concurrent.TimeUnit.MILLISECONDS);
 +        }
@@ -130,27 +190,56 @@ index 8849cc2..500e46b 100644
          if (absolute) {
              int cx = (int) Math.floor(w.getX()) >> 4;
              int cz = (int) Math.floor(w.getZ()) >> 4;
-@@ -619,6 +628,7 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -617,18 +646,6 @@ public final class SeamlessPacketListener implements PacketListener {
+                 return;
+             }
          }
-         // Freeze: hover in place instead of falling into not-yet-loaded ground. The backend agent
-         // grants allowFlight server-side during the arrival grace so this cannot kick the player.
-+        if (state.frozeFlight() || state.abFlying()) return;
-         sendSuppressed(user, state, new WrapperPlayServerPlayerAbilities(
-                 state.abGodMode(), true, true, state.abCreative(),
-                 state.abFlySpeed(), state.abFovModifier()));
-@@ -637,9 +647,9 @@ public final class SeamlessPacketListener implements PacketListener {
+-        // Freeze: hover in place instead of falling into not-yet-loaded ground. The backend agent
+-        // grants allowFlight server-side during the arrival grace so this cannot kick the player.
+-        sendSuppressed(user, state, new WrapperPlayServerPlayerAbilities(
+-                state.abGodMode(), true, true, state.abCreative(),
+-                state.abFlySpeed(), state.abFovModifier()));
+-        state.frozeFlight(true);
+-        if (config.debug()) {
+-            logger.info("[InstantTransfer] arrival teleport for {}: target chunk {} — freeze on",
+-                    user.getName(),
+-                    absolute ? "(" + state.targetChunkX() + "," + state.targetChunkZ() + ")"
+-                             : "unknown (relative coords)");
+-        }
+     }
+ 
+     /** Finish the switch exactly once: un-freeze, then remove the previous server's ghosts. */
+@@ -636,28 +653,7 @@ public final class SeamlessPacketListener implements PacketListener {
+         if (!state.finishGuard()) {
              return;
          }
-         if (state.frozeFlight()) {
+-        if (state.frozeFlight()) {
 -            // End the hover NOW (flying=false: gravity resumes onto the freshly loaded ground).
-+            // Restore the last abilities sent by the destination, including intentional flight.
-             sendSuppressed(user, state, new WrapperPlayServerPlayerAbilities(
+-            sendSuppressed(user, state, new WrapperPlayServerPlayerAbilities(
 -                    state.abGodMode(), false, state.abFlightAllowed(),
-+                    state.abGodMode(), state.abFlying(), state.abFlightAllowed(),
-                     state.abCreative(), state.abFlySpeed(), state.abFovModifier()));
-             state.frozeFlight(false);
-         }
-@@ -670,12 +680,18 @@ public final class SeamlessPacketListener implements PacketListener {
+-                    state.abCreative(), state.abFlySpeed(), state.abFovModifier()));
+-            state.frozeFlight(false);
+-        }
+-        // The gamemode is normally adopted from JoinGame/Respawn, which a seamless switch never
+-        // sends: if it differs between backends (e.g. /gamemode creative on one of them), the stale
+-        // client gamemode desyncs eating (infinite chewing), flight and block breaking. Resync it
+-        // AFTER the abilities restore (a gamemode change resets client abilities).
+-        int gamemode = state.pendingGamemode();
+-        if (gamemode >= 0) {
+-            sendSuppressed(user, state, new WrapperPlayServerChangeGameState(
+-                    WrapperPlayServerChangeGameState.Reason.CHANGE_GAME_MODE, gamemode));
+-            state.pendingGamemode(-1);
+-        }
+-
+-        // The agent granted allowFlight for its whole grace window (so the hover can never kick);
+-        // tell it the arrival is over so it restores the real flight permission immediately —
+-        // otherwise the player can fly for the rest of the grace and gets rolled back at its end.
+-        coord.sendUnfreeze(user.getUUID());
++        syncPendingGamemode(user, state);
+ 
+         Set<Integer> ghostEntities = state.ghostEntities();
+         Set<Long> ghostChunks = state.ghostChunks();
+@@ -670,12 +666,18 @@ public final class SeamlessPacketListener implements PacketListener {
              state.trackedEntities().removeAll(ghostEntities);
          }
          int chunkCount = ghostChunks.size();
@@ -174,7 +263,7 @@ index 8849cc2..500e46b 100644
  
          // Effects from the previous server the new one did not re-apply: clear their client display.
          Map<String, PotionType> ghostEffects = state.ghostEffects();
-@@ -819,52 +835,6 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -819,52 +821,6 @@ public final class SeamlessPacketListener implements PacketListener {
          logger.debug("[InstantTransfer] flushed {} deferred chunk unloads", keys.length);
      }
  
@@ -227,6 +316,22 @@ index 8849cc2..500e46b 100644
      private void fireTransferTimeout(User user) {
          UUID uuid = user.getUUID();
          Player player = plugin.getProxy().getPlayer(uuid).orElse(null);
+@@ -878,6 +834,15 @@ public final class SeamlessPacketListener implements PacketListener {
+         );
+     }
+ 
++    private void syncPendingGamemode(User user, SwitchState state) {
++        int gamemode = state.pendingGamemode();
++        if (gamemode < 0) return;
++        state.pendingGamemode(-1);
++        // Gamemode resets client abilities. Send it before forwarding the backend's abilities.
++        sendSuppressed(user, state, new WrapperPlayServerChangeGameState(
++                WrapperPlayServerChangeGameState.Reason.CHANGE_GAME_MODE, gamemode));
++    }
++
+     /** Send a packet of ours without re-triggering this listener (see class javadoc). */
+     private void sendSuppressed(User user, SwitchState state,
+                                 com.github.retrooper.packetevents.wrapper.PacketWrapper<?> packet) {
 diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchManager.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchManager.java
 index 63e19ae..e0466fa 100644
 --- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchManager.java
@@ -269,25 +374,38 @@ index 63e19ae..e0466fa 100644
 \ No newline at end of file
 +}
 diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java
-index 86f5b4a..e5c7d5d 100644
+index 86f5b4a..cd66f0f 100644
 --- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java
 +++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java
-@@ -109,6 +109,10 @@ public final class SwitchState {
+@@ -109,6 +109,22 @@ public final class SwitchState {
  
      /** Wall-clock time the guard was armed / the teleport was seen, for the timeout safety net. */
      private volatile long guardArmedAt = 0L;
 +    private long switchGeneration;
++    private boolean waitingForArrivalAck;
++    private Integer arrivalTeleportId;
 +
 +    public long switchGeneration() { return switchGeneration; }
-+    public void invalidateChunkCleanup() { switchGeneration++; }
++    public void invalidateChunkCleanup() {
++        switchGeneration++;
++        waitingForArrivalAck = false;
++        arrivalTeleportId = null;
++    }
++    public boolean waitingForArrivalAck() { return waitingForArrivalAck; }
++    public void awaitArrivalAck(int id) { arrivalTeleportId = id; }
++    public void acknowledgeArrival(int id) {
++        if (arrivalTeleportId != null && arrivalTeleportId == id) stopWaitingForArrivalAck();
++    }
++    public void stopWaitingForArrivalAck() { waitingForArrivalAck = false; }
  
      /** True once the arrival PLAYER_POSITION_AND_LOOK has been seen (and the freeze injected). */
      private boolean teleportSeen = false;
-@@ -197,6 +201,7 @@ public final class SwitchState {
+@@ -197,6 +213,8 @@ public final class SwitchState {
      public ProtocolAdapter adapterIfResolved() { return adapter; }
  
      public void armGuard(long nowMillis) {
 +        invalidateChunkCleanup();
++        waitingForArrivalAck = true;
          teleportSeen = false;
          targetChunkKnown = false;
          arrivalPositionKnown = false;

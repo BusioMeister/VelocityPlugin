@@ -28,6 +28,10 @@ commit `74e1be2b0fb798b24e74ec9496f99baf8e7aa190`, wskazany przez Bifu.
   o połączenie. Timeout nie wysyła już teleportu na starą pozycję.
   Chunk docelowy odblokowuje gracza, ale usunięcie pozostałych starych
   chunków czeka 750 ms na dosłanie wspólnej części widoku.
+  Ruch do nowego backendu czeka na potwierdzenie jego teleportu. Proxy nie
+  wymusza lotu przy lądowaniu ani nie nadpisuje później umiejętności: wysyła
+  tryb gry przed pakietem umiejętności z Paper. Agent nie przyznaje
+  tymczasowego prawa lotu w odpowiedzi na `arrival`.
 - W teście użyto PacketEvents **2.14.0**, które dodaje obsługę 26.3.
   Plugin proxy zbudowano przez `mvn -Dvelocity.version=4.3.1 -Dpacketevents.version=2.14.0 verify`.
   Agent Paper używa nieshade'owanego oryginału JAR + zewnętrznego PacketEvents,
