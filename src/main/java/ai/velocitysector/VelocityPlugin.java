@@ -58,7 +58,12 @@ public class VelocityPlugin {
         String mongoDatabase = System.getProperty("aisector.mongodb.database",
                 System.getenv().getOrDefault("AISECTOR_MONGODB_DATABASE", "users"));
         mongoDBManager = new MongoDBManager(mongoUri, mongoDatabase);
-        playerSectorPersistence = new PlayerSectorPersistence(mongoDBManager);
+        String lockedSpawn = System.getProperty("aisector.locked-spawn",
+                System.getenv().getOrDefault("AISECTOR_LOCKED_SPAWN", ""));
+        if (!lockedSpawn.isEmpty() && !PlayerSectorPersistence.isValidSectorName(lockedSpawn))
+            throw new IllegalArgumentException("Invalid aisector.locked-spawn name");
+        SpawnExitGate spawnExitGate = new SpawnExitGate(lockedSpawn);
+        playerSectorPersistence = new PlayerSectorPersistence(mongoDBManager, lockedSpawn.isEmpty() ? "Sector1" : lockedSpawn);
         onlinePlayersListener = new OnlinePlayersListener();
         redisManager.psubscribe(onlinePlayersListener, RedisChannels.ONLINE_PLAYERS_PATTERN);
 
@@ -70,7 +75,8 @@ public class VelocityPlugin {
         whitelistCommand = new WhitelistCommand(proxy, this, redisManager, mongoDBManager);
         proxy.getCommandManager().register(meta, whitelistCommand);
 
-        NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, tpaRequests, onlinePlayersListener, logger) {};
+        NetworkListener networkListener = new NetworkListener(proxy, redisManager, mongoDBManager, tpaRequests,
+                onlinePlayersListener, logger, spawnExitGate) {};
         redisManager.subscribe(
                 networkListener,
                 RedisChannels.SECTOR_TRANSFER, RedisChannels.TPA_REQUEST, RedisChannels.TPA_ACCEPT,
@@ -83,6 +89,7 @@ public class VelocityPlugin {
 
 
         proxy.getChannelRegistrar().register(VelocityGlobalChat.CHANNEL);
+        proxy.getEventManager().register(this, spawnExitGate);
         proxy.getEventManager().register(this,
                 new PlayerDisconnectListener(playerSectorPersistence, logger, tpaRequests, networkListener));
         proxy.getEventManager().register(this,

@@ -1,0 +1,293 @@
+diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
+index 2451689..870d487 100644
+--- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
++++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
+@@ -178,9 +178,9 @@ public final class EntityIdRemapper implements PacketListener {
+                 RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state);
+ 
+             } else if (type == PacketType.Play.Server.ENTITY_EQUIPMENT) {
+-                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
+-                WrapperPlayServerEntityEquipment w = new WrapperPlayServerEntityEquipment(event);
+-                remapSend(event, w.getEntityId(), w::setEntityId, state);
++                // Minecraft 26.3: the equipment wrapper can read the wrong sliced offset
++                // and leave a truncated packet. Change only the leading entity ID.
++                RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state);
+ 
+             } else if (type == PacketType.Play.Server.SET_PASSENGERS) {
+                 WrapperPlayServerSetPassengers w = new WrapperPlayServerSetPassengers(event);
+@@ -305,11 +305,6 @@ public final class EntityIdRemapper implements PacketListener {
+             return;
+         }
+         event.setCancelled(true); // synthetic proxy->plugin signal, never meant for the client
+-        // The patch writes this message BEFORE relaying anything from the new backend: from here
+-        // on, incoming traffic is the new server's (late old-server packets can no longer occur).
+-        state.markNewServerTalking();
+-        purgeStaleScoreboard(user, state);
+-        purgeStaleEntities(user, state);
+         String payload = new String(w.getData(), StandardCharsets.UTF_8);
+         if (!verifyIdsHmac(payload, state)) {
+             return;
+@@ -336,12 +331,17 @@ public final class EntityIdRemapper implements PacketListener {
+         try {
+             clientId = Integer.parseInt(parts[0]);
+             backendId = Integer.parseInt(parts[1]);
++            int mode = parts.length >= 3 ? Integer.parseInt(parts[2]) : -1;
++            // A denied/failed PreConnect can never arm this guard. Only the actual cutoff between
++            // backends can turn live chunks into ghosts or make a teleport count as an arrival.
++            state.snapshotGhosts();
++            state.armGuard(System.currentTimeMillis());
++            state.resetPeekProbes();
++            state.markNewServerTalking();
++            purgeStaleScoreboard(user, state);
++            purgeStaleEntities(user, state);
+             state.entityIds(clientId, backendId);
+-            if (parts.length >= 3) {
+-                // The new backend's gamemode: applied on arrival (release), since the client no longer
+-                // learns it from JoinGame/Respawn.
+-                state.pendingGamemode(Integer.parseInt(parts[2]));
+-            }
++            state.pendingGamemode(mode);
+         } catch (NumberFormatException e) {
+             logger.warn("[InstantTransfer] bad ids payload: {}", payload);
+             return;
+diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
+index 8849cc2..500e46b 100644
+--- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
++++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
+@@ -197,6 +197,8 @@ public final class SeamlessPacketListener implements PacketListener {
+                     cz = SwitchState.chunkZ(key);
+                     if (config.debug() && state.nextChunkPeekCheck() < 10) {
+                         key = verifyChunkPeek(event, user, key, body, state); // sanity + offset self-heal
++                        cx = SwitchState.chunkX(key);
++                        cz = SwitchState.chunkZ(key);
+                     }
+                 } else {
+                     // Unknown slicing/era: pay the wrapper cost rather than lose tracking accuracy.
+@@ -224,6 +226,11 @@ public final class SeamlessPacketListener implements PacketListener {
+                 // forward none); it defines the entity id the client keeps for its whole session.
+                 WrapperPlayServerJoinGame w = new WrapperPlayServerJoinGame(event);
+                 state.entityIds(w.getEntityId(), w.getEntityId());
++                state.invalidateChunkCleanup();
++                state.pendingChunkUnloads().clear();
++                state.ghostChunks().clear();
++                state.loadedChunks().clear();
++                state.finishGuard();
+                 state.clientDimension(dimensionKey(w.getDimensionTypeRef(),
+                         state.adapter(() -> ProtocolAdapter.forClientVersion(user.getClientVersion()))));
+                 state.markNewServerTalking(); // safety: patch disabled → vanilla switch path
+@@ -387,20 +394,12 @@ public final class SeamlessPacketListener implements PacketListener {
+                     LoadedChunkPruner.prune(state.loadedChunks(),
+                             (int) Math.floor(w.getX()) >> 4, (int) Math.floor(w.getZ()) >> 4, 32);
+                 }
+-                if (state.guardActive() && !state.teleportSeen()) {
++                if (state.guardActive()) {
+                     onArrivalTeleport(event, user, state);
+                     return;
+                 }
+             }
+ 
+-            // Safety net: if the arrival chunk doesn't arrive in time, send a position correction
+-            // to the known arrival position and keep flight enabled (don't unfreeze brutally).
+-            // Use a snapshot to read guard state atomically and avoid TOCTOU races.
+-            SwitchState.SwitchStateSnapshot s = state.snapshot();
+-            if (s.guardActive && s.teleportSeen
+-                    && System.currentTimeMillis() - s.guardArmedAt > config.guardTimeoutMs()) {
+-                handleTimeout(user, state);
+-            }
+         } catch (Exception e) {
+             if (config.debug()) {
+                 logger.warn("[InstantTransfer] listener error on {}: {}", type, e.toString());
+@@ -459,6 +458,7 @@ public final class SeamlessPacketListener implements PacketListener {
+         }
+         // Cross-dimension: the client rebuilt its level from scratch; nothing old survives.
+         // (Scoreboard tracking is intentionally kept: it is connection-scoped client-side.)
++        state.invalidateChunkCleanup();
+         state.loadedChunks().clear();
+         state.trackedEntities().clear();
+         state.ghostEntities().clear();
+@@ -599,13 +599,22 @@ public final class SeamlessPacketListener implements PacketListener {
+      */
+     private void onArrivalTeleport(PacketSendEvent event, User user, SwitchState state) {
+         WrapperPlayServerPlayerPositionAndLook w = new WrapperPlayServerPlayerPositionAndLook(event);
++        boolean first = !state.teleportSeen();
+         state.markTeleportSeen(System.currentTimeMillis());
++        if (first) {
++            long generation = state.switchGeneration();
++            var channel = (io.netty.channel.Channel) user.getChannel();
++            channel.eventLoop().schedule(() -> {
++                if (channel.isActive() && state.switchGeneration() == generation && state.guardActive()) {
++                    fireTransferTimeout(user);
++                    release(user, state, "arrival wait expired; no position correction");
++                }
++            }, config.guardTimeoutMs(), java.util.concurrent.TimeUnit.MILLISECONDS);
++        }
+ 
+         byte mask = w.getRelativeMask();
+         boolean absolute = (mask & (REL_X | REL_Z)) == 0;
+ 
+-        // Store arrival position for potential timeout correction (only if absolute coords)
+-        state.arrivalPosition(w.getX(), w.getY(), w.getZ(), w.getYaw(), w.getPitch(), absolute);
+         if (absolute) {
+             int cx = (int) Math.floor(w.getX()) >> 4;
+             int cz = (int) Math.floor(w.getZ()) >> 4;
+@@ -619,6 +628,7 @@ public final class SeamlessPacketListener implements PacketListener {
+         }
+         // Freeze: hover in place instead of falling into not-yet-loaded ground. The backend agent
+         // grants allowFlight server-side during the arrival grace so this cannot kick the player.
++        if (state.frozeFlight() || state.abFlying()) return;
+         sendSuppressed(user, state, new WrapperPlayServerPlayerAbilities(
+                 state.abGodMode(), true, true, state.abCreative(),
+                 state.abFlySpeed(), state.abFovModifier()));
+@@ -637,9 +647,9 @@ public final class SeamlessPacketListener implements PacketListener {
+             return;
+         }
+         if (state.frozeFlight()) {
+-            // End the hover NOW (flying=false: gravity resumes onto the freshly loaded ground).
++            // Restore the last abilities sent by the destination, including intentional flight.
+             sendSuppressed(user, state, new WrapperPlayServerPlayerAbilities(
+-                    state.abGodMode(), false, state.abFlightAllowed(),
++                    state.abGodMode(), state.abFlying(), state.abFlightAllowed(),
+                     state.abCreative(), state.abFlySpeed(), state.abFovModifier()));
+             state.frozeFlight(false);
+         }
+@@ -670,12 +680,18 @@ public final class SeamlessPacketListener implements PacketListener {
+             state.trackedEntities().removeAll(ghostEntities);
+         }
+         int chunkCount = ghostChunks.size();
+-        state.loadedChunks().removeAll(ghostChunks);
+         ghostEntities.clear();
+-        ghostChunks.clear();
+-        // Ghost-chunk unloads were deferred when the switch armed; resends during the guard
+-        // canceled theirs — whatever survived goes out here, in one sorted batch.
+-        flushPendingChunkUnloads(user, state);
++        // The landing chunk arrives before the rest of the view. Let that initial stream replace
++        // shared chunks in place before removing leftovers, or the view visibly blinks.
++        long generation = state.switchGeneration();
++        var channel = (io.netty.channel.Channel) user.getChannel();
++        channel.eventLoop().schedule(() -> {
++            if (channel.isActive() && state.switchGeneration() == generation) {
++                state.loadedChunks().removeAll(state.ghostChunks());
++                state.ghostChunks().clear();
++                flushPendingChunkUnloads(user, state);
++            }
++        }, 750, java.util.concurrent.TimeUnit.MILLISECONDS);
+ 
+         // Effects from the previous server the new one did not re-apply: clear their client display.
+         Map<String, PotionType> ghostEffects = state.ghostEffects();
+@@ -819,52 +835,6 @@ public final class SeamlessPacketListener implements PacketListener {
+         logger.debug("[InstantTransfer] flushed {} deferred chunk unloads", keys.length);
+     }
+ 
+-    /**
+-     * Handle guard timeout: the arrival chunk didn't arrive in time.
+-     * If we have an absolute arrival position, send a position correction and keep flight enabled.
+-     * If relative (unknown absolute position), just extend the timeout — don't guess the position.
+-     */
+-    private void handleTimeout(User user, SwitchState state) {
+-        flushPendingChunkUnloads(user, state);
+-        if (!state.arrivalPositionKnown()) {
+-            if (config.debug()) {
+-                logger.warn("[InstantTransfer] timeout but no arrival position known for {}, extending guard",
+-                        user.getName());
+-            }
+-            // No position known, just extend timeout
+-            state.markTeleportSeen(System.currentTimeMillis());
+-            fireTransferTimeout(user);
+-            return;
+-        }
+-        if (!state.arrivalPositionAbsolute()) {
+-            if (config.debug()) {
+-                logger.warn("[InstantTransfer] timeout but arrival position was relative for {}, extending guard (no correction)",
+-                        user.getName());
+-            }
+-            // Relative teleport: we don't know the absolute position, don't guess.
+-            // Just extend the guard timeout and wait for the chunk.
+-            state.markTeleportSeen(System.currentTimeMillis());
+-            fireTransferTimeout(user);
+-            return;
+-        }
+-        // Absolute position known: send correction and keep flight enabled.
+-        if (config.debug()) {
+-            logger.info("[InstantTransfer] guard timeout for {} — sending position correction to ({},{},{}) and keeping flight",
+-                    user.getName(), state.arrivalX(), state.arrivalY(), state.arrivalZ());
+-        }
+-        sendSuppressed(user, state, new WrapperPlayServerPlayerPositionAndLook(
+-                state.arrivalX(), state.arrivalY(), state.arrivalZ(),
+-                state.arrivalYaw(), state.arrivalPitch(),
+-                (byte) 0, // absolute coordinates (no relative flags)
+-                0, // teleport ID
+-                true)); // onGround
+-        // Restart the guard timer from now — we'll wait longer for the chunk.
+-        state.markTeleportSeen(System.currentTimeMillis());
+-        fireTransferTimeout(user);
+-        // Do NOT call finishGuard() or unfreeze — flight stays on, guard stays active.
+-        // The normal chunk-arrival path in onPacketSend (CHUNK_DATA handling) will call release().
+-    }
+-
+     private void fireTransferTimeout(User user) {
+         UUID uuid = user.getUUID();
+         Player player = plugin.getProxy().getPlayer(uuid).orElse(null);
+diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchManager.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchManager.java
+index 63e19ae..e0466fa 100644
+--- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchManager.java
++++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchManager.java
+@@ -93,18 +93,6 @@ public final class SwitchManager {
+             previousServers.put(uuid, previousServer);
+         }
+ 
+-        SwitchState state = getOrCreate(uuid);
+-        // Snapshot the current (old server's) entities and chunks; they become ghosts after the
+-        // switch. Runs for EVERY post-join switch — a plain /server switch is seamless too (the
+-        // patch handles it unconditionally), and without this snapshot the ghost/purge lifecycle
+-        // never engages (observed live: S1 entities surviving on S2).
+-        state.snapshotGhosts();
+-        // Arm the arrival guard: freeze on the arrival teleport, release on the landing chunk.
+-        state.armGuard(System.currentTimeMillis());
+-        // Re-enable the raw-peek sanity probes for this switch (they stop after 10 packets to
+-        // stay free in steady state).
+-        state.resetPeekProbes();
+-
+         // Fire transfer start event only for explicit instant-transfer requests
+         if (instantTransferRequest) {
+             plugin.fireTransferStart(
+@@ -117,9 +105,7 @@ public final class SwitchManager {
+         if (config.debug()) {
+             String from = currentConnection.getServerInfo().getName();
+             String to = requestedTarget.getServerInfo().getName();
+-            logger.info("[InstantTransfer] switch armed for {}: {} -> {} (snapshot {} entities, {} chunks)",
+-                    player.getUsername(), from, to,
+-                    state.ghostEntities().size(), state.ghostChunks().size());
++            logger.info("[InstantTransfer] switch requested for {}: {} -> {}", player.getUsername(), from, to);
+         }
+     }
+ 
+@@ -128,4 +114,4 @@ public final class SwitchManager {
+         states.remove(event.getPlayer().getUniqueId());
+         previousServers.remove(event.getPlayer().getUniqueId());
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java
+index 86f5b4a..e5c7d5d 100644
+--- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java
++++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java
+@@ -109,6 +109,10 @@ public final class SwitchState {
+ 
+     /** Wall-clock time the guard was armed / the teleport was seen, for the timeout safety net. */
+     private volatile long guardArmedAt = 0L;
++    private long switchGeneration;
++
++    public long switchGeneration() { return switchGeneration; }
++    public void invalidateChunkCleanup() { switchGeneration++; }
+ 
+     /** True once the arrival PLAYER_POSITION_AND_LOOK has been seen (and the freeze injected). */
+     private boolean teleportSeen = false;
+@@ -197,6 +201,7 @@ public final class SwitchState {
+     public ProtocolAdapter adapterIfResolved() { return adapter; }
+ 
+     public void armGuard(long nowMillis) {
++        invalidateChunkCleanup();
+         teleportSeen = false;
+         targetChunkKnown = false;
+         arrivalPositionKnown = false;

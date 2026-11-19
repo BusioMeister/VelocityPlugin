@@ -1,5 +1,12 @@
 # aiSector-Velocity
 
+Dla zamkniętego spawna uruchom proxy z `-Daisector.locked-spawn=Spawn`
+(lub `AISECTOR_LOCKED_SPAWN=Spawn`) razem z odpowiednim profilem backendów.
+Bez tej opcji routing zachowuje poprzednie ustawienia.
+
+Opcjonalny silnik Velocity 4.3.1 dla Minecrafta 26.3 bez ekranów przy
+przejściach między zgodnymi backendami: [SEAMLESS_FORK.md](SEAMLESS_FORK.md).
+
 **Kompletny workspace (shared, audytory, źródła testów runtime i dokumentacja):** [aiSector/WORKSPACE.md](https://github.com/BusioMeister/aiSector/blob/master/WORKSPACE.md). Kod proxy i jego unit tests są w `src/`, wspólne źródła do samodzielnego buildu w `build-support/shared/`.
 
 ## Rewrite 2.0 — 2026-11-02

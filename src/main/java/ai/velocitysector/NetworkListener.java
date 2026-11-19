@@ -35,6 +35,7 @@ public abstract class NetworkListener extends JedisPubSub {
     private final MongoDBManager mongoDBManager;
     private final Map<UUID, PendingTpaRequest> tpaRequests;
     private final Logger logger;
+    private final SpawnExitGate spawnExitGate;
 
     private final Gson gson = new Gson();
     private final Map<String, JsonObject> sectorStats = new ConcurrentHashMap<>();
@@ -62,13 +63,14 @@ public abstract class NetworkListener extends JedisPubSub {
 
     public NetworkListener(ProxyServer proxy, RedisManager redisManager, MongoDBManager mongoDBManager,
                            Map<UUID, PendingTpaRequest> tpaRequests,
-                           OnlinePlayersListener onlinePlayersListener, Logger logger) {
+                           OnlinePlayersListener onlinePlayersListener, Logger logger, SpawnExitGate spawnExitGate) {
         this.proxy = proxy;
         this.redisManager = redisManager;
         this.onlinePlayersListener = onlinePlayersListener;
         this.mongoDBManager = mongoDBManager;
         this.tpaRequests = tpaRequests;
         this.logger = logger;
+        this.spawnExitGate = spawnExitGate;
     }
 
     private static final LegacyComponentSerializer LEGACY =
@@ -567,8 +569,9 @@ public abstract class NetworkListener extends JedisPubSub {
 
     private void handleTransfer(String message) {
         if (message == null || message.isBlank()) return;
-        String[] data = message.split(":", 2);
-        if (data.length != 2) return;
+        String[] data = message.split(":", 3);
+        if (data.length < 2 || (data.length == 3 && !"spawn-button".equals(data[2]))) return;
+        boolean spawnButton = data.length == 3;
         UUID uuid;
         try {
             uuid = UUID.fromString(data[0]);
@@ -588,7 +591,11 @@ public abstract class NetworkListener extends JedisPubSub {
         }
         proxy.getPlayer(uuid).ifPresent(player -> {
             destination.ifPresent(server -> {
+                boolean onSpawn = spawnExitGate.onSpawn(player);
+                if (spawnButton != onSpawn || (spawnButton && spawnExitGate.isSpawn(targetServerName))) return;
+                SpawnExitGate.Permit permit = spawnButton ? spawnExitGate.authorize(player, server) : null;
                 player.createConnectionRequest(server).connect().whenComplete((result, error) -> {
+                    if (permit != null) spawnExitGate.revoke(permit);
                     if (error != null || result == null || !result.isSuccessful()) {
                         logger.warn("Transfer of {} to {} failed", player.getUsername(), targetServerName, error);
                         return;

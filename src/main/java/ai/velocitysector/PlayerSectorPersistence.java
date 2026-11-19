@@ -8,13 +8,17 @@ import java.util.concurrent.CompletableFuture;
 
 /** Serializes preferred-sector read/update and disconnect saves per player UUID. */
 final class PlayerSectorPersistence {
-    private static final String DEFAULT_SECTOR = "Sector1";
-
     private final MongoDBManager database;
+    private final String defaultSector;
     private final AsyncKeyedSequencer<UUID> sequencer = new AsyncKeyedSequencer<>();
 
     PlayerSectorPersistence(MongoDBManager database) {
+        this(database, "Sector1");
+    }
+
+    PlayerSectorPersistence(MongoDBManager database, String defaultSector) {
         this.database = database;
+        this.defaultSector = defaultSector;
     }
 
     CompletableFuture<String> loadAndUpdate(UUID playerUuid, String playerName) {
@@ -41,7 +45,7 @@ final class PlayerSectorPersistence {
         if (document != null && document.get("sector") instanceof String sector && isValidSectorName(sector)) {
             return sector;
         }
-        return DEFAULT_SECTOR;
+        return defaultSector;
     }
 
     static boolean isValidSectorName(String sector) {

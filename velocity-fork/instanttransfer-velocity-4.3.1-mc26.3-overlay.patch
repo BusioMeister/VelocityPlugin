@@ -1,0 +1,145 @@
+diff --git a/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/BackendPlaySessionHandler.java b/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/BackendPlaySessionHandler.java
+index 622cc87..f82d2d9 100644
+--- a/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/BackendPlaySessionHandler.java
++++ b/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/BackendPlaySessionHandler.java
+@@ -188,12 +188,11 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
+ 
+   @Override
+   public boolean handle(BossBarPacket packet) {
+-    if (serverConn.getPlayer().getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_20_2)) {
+-      if (packet.getAction() == BossBarPacket.ADD) {
+-        playerSessionHandler.getServerBossBars().add(packet.getUuid());
+-      } else if (packet.getAction() == BossBarPacket.REMOVE) {
+-        playerSessionHandler.getServerBossBars().remove(packet.getUuid());
+-      }
++    var bars = playerSessionHandler.getServerBossBars();
++    if (packet.getAction() == BossBarPacket.ADD) {
++      if (!bars.contains(packet.getUuid())) bars.add(packet.getUuid());
++    } else if (packet.getAction() == BossBarPacket.REMOVE) {
++      bars.remove(packet.getUuid());
+     }
+     return false; // forward
+   }
+diff --git a/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/ConfigSessionHandler.java b/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/ConfigSessionHandler.java
+index 6292cdd..da9cf5f 100644
+--- a/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/ConfigSessionHandler.java
++++ b/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/ConfigSessionHandler.java
+@@ -107,7 +107,7 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
+     this.resultFuture = resultFuture;
+     this.state = State.START;
+     // A switch (not the initial login) is happening iff the client is still in the PLAY handler.
+-    this.seamless = ClientPlaySessionHandler.SEAMLESS_SWITCH
++    this.seamless = ClientPlaySessionHandler.canUseSeamless(serverConn.getPlayer(), serverConn)
+         && serverConn.getPlayer().getConnection().getActiveSessionHandler()
+             instanceof ClientPlaySessionHandler;
+     if (this.seamless) {
+diff --git a/proxy/src/main/java/com/velocitypowered/proxy/connection/client/ClientPlaySessionHandler.java b/proxy/src/main/java/com/velocitypowered/proxy/connection/client/ClientPlaySessionHandler.java
+index 60aa514..9f8fa4e 100644
+--- a/proxy/src/main/java/com/velocitypowered/proxy/connection/client/ClientPlaySessionHandler.java
++++ b/proxy/src/main/java/com/velocitypowered/proxy/connection/client/ClientPlaySessionHandler.java
+@@ -608,13 +608,35 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+    */
+   /**
+    * Skip the client configuration phase on server switches so the client never leaves PLAY.
+-   * This is a purpose-built patched jar, so it defaults to ON; disable with
+-   * -Dvelocity.seamlessSwitch=false (or env VELOCITY_SEAMLESS_SWITCH=false).
++   * Opt in with -Dvelocity.seamlessSwitch=true (or env VELOCITY_SEAMLESS_SWITCH=true).
+    */
+   public static final boolean SEAMLESS_SWITCH =
+-      !"false".equalsIgnoreCase(System.getProperty("velocity.seamlessSwitch",
++      "true".equalsIgnoreCase(System.getProperty("velocity.seamlessSwitch",
+           System.getenv("VELOCITY_SEAMLESS_SWITCH")));
+ 
++  private boolean seamlessInFlight;
++  private static final boolean SEAMLESS_SPAWN = Boolean.getBoolean("velocity.seamlessSpawn");
++
++  /**
++   * Route by backend, not command: all approved routes must use matching 26.3 registries.
++   * Spawn is separately opted in because it uses a different copy of the overworld.
++   */
++  public static boolean canUseSeamless(ConnectedPlayer player, @Nullable VelocityServerConnection target) {
++    var source = player.getConnectedServer();
++    if (!SEAMLESS_SWITCH || player.getProtocolVersion() != ProtocolVersion.MINECRAFT_26_3
++        || target == null || source == null) {
++      return false;
++    }
++    String from = source.getServerInfo().getName();
++    String to = target.getServerInfo().getName();
++    return !from.equals(to) && isSeamlessBackend(from) && isSeamlessBackend(to);
++  }
++
++  private static boolean isSeamlessBackend(String name) {
++    return name.equals("GameWest") || name.equals("GameEast")
++        || (SEAMLESS_SPAWN && name.equals("Spawn"));
++  }
++
+   /**
+    * Seamless switch flavor. Default (false) = ZERO-SCREEN: send neither JoinGame nor Respawn; the
+    * world morphs in place from the new backend's packets (requires the companion proxy plugin for
+@@ -682,12 +704,26 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+     // Seamless applies to BOTH eras: ≥1.20.2 absorbs the configuration phase proxy-side;
+     // <1.20.2 has no config phase and switches purely inside PLAY (JoinGame intercepted in
+     // doSeamlessLegacySwitch). Boss-bar dropping below keeps its own version check.
+-    final boolean seamless = SEAMLESS_SWITCH;
++    final boolean seamless = canUseSeamless(player, player.getConnectionInFlight());
++    seamlessInFlight = seamless;
+ 
+     logger.info("[seamless] doSwitch for {}: seamless={} (SEAMLESS_SWITCH flag={})",
+         player.getUsername(), seamless, SEAMLESS_SWITCH);
+ 
+     if (existingConnection != null) {
++      if (seamless) {
++        // No JoinGame/Respawn for same-world swaps: the client still owns every
++        // backend bar until it sees REMOVE. Keep proxy-owned bars separate.
++        for (UUID id : serverBossBars) {
++          BossBarPacket remove = new BossBarPacket();
++          remove.setUuid(id);
++          remove.setAction(BossBarPacket.REMOVE);
++          player.getConnection().write(remove);
++        }
++      }
++      if (seamless || player.getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_1_20_2)) {
++        serverBossBars.clear();
++      }
+       // Shut down the existing server connection.
+       player.setConnectedServer(null);
+       existingConnection.disconnect();
+@@ -746,16 +782,15 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+       // entity IDs and send new dimension information.
+       if (player.getConnection().getType() == ConnectionTypes.LEGACY_FORGE) {
+         this.doSafeClientServerSwitch(joinGame);
+-      } else if (SEAMLESS_SWITCH && player.getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_1_20_2)) {
++      } else if (seamlessInFlight) {
+         this.doSeamlessClientServerSwitch(joinGame);
+-      } else if (SEAMLESS_SWITCH) {
+-        this.doSeamlessLegacySwitch(joinGame);
+       } else {
+         this.doFastClientServerSwitch(joinGame);
+       }
+     }
+ 
+     destination.setEntityId(joinGame.getEntityId()); // used for sound api
++    seamlessInFlight = false;
+     if (player.getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_1_20_2)) {
+       player.getBossBarManager().sendBossBars();
+     } else {
+diff --git a/proxy/src/main/java/com/velocitypowered/proxy/protocol/StateRegistry.java b/proxy/src/main/java/com/velocitypowered/proxy/protocol/StateRegistry.java
+index 1da9c42..eaafee4 100644
+--- a/proxy/src/main/java/com/velocitypowered/proxy/protocol/StateRegistry.java
++++ b/proxy/src/main/java/com/velocitypowered/proxy/protocol/StateRegistry.java
+@@ -617,7 +617,7 @@ public enum StateRegistry {
+           map(0x4B, MINECRAFT_1_21_5, true),
+           map(0x50, MINECRAFT_1_21_9, true),
+           map(0x52, MINECRAFT_26_1, true),
+-          map(0x54, MINECRAFT_26_3, true));
++          map(0x54, MINECRAFT_26_3, false));
+       clientbound.register(
+           RemoveResourcePackPacket.class,
+           RemoveResourcePackPacket::new,
+@@ -1190,4 +1190,4 @@ public enum StateRegistry {
+     return new PacketMapping(id, version, lastValidProtocolVersion, encodeOnly);
+   }
+ 
+-}
+\ No newline at end of file
++}
