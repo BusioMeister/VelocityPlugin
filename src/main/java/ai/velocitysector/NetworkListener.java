@@ -58,11 +58,11 @@ public abstract class NetworkListener extends JedisPubSub {
     private record PendingTransfer(Player player, RegisteredServer destination,
                                    String requesterName, String completionMessage,
                                    String cleanupKey, String cleanupValue, String cleanupTokenKey,
-                                   String cleanupToken, boolean adminTeleport) {
+                                   String cleanupToken, String adminPurpose) {
         PendingTransfer(Player player, RegisteredServer destination, String requesterName, String completionMessage,
                         String cleanupKey, String cleanupValue, String cleanupTokenKey, String cleanupToken) {
             this(player, destination, requesterName, completionMessage, cleanupKey, cleanupValue,
-                    cleanupTokenKey, cleanupToken, false);
+                    cleanupTokenKey, cleanupToken, null);
         }
     }
 
@@ -270,7 +270,7 @@ public abstract class NetworkListener extends JedisPubSub {
                         return;
                     }
                     requestSaveThenTransfer(admin, targetServer, admin.getUsername(), null,
-                             targetKey, locationJson.toString(), cleanupTokenKey, cleanupToken, cleanupToken, true);
+                             targetKey, locationJson.toString(), cleanupTokenKey, cleanupToken, cleanupToken, "admin-tp");
                     logger.info("[TP] Zlecono zapis przed przeniesieniem admina {} na serwer {}",
                             admin.getUsername(), targetServerName);
                 });
@@ -523,6 +523,18 @@ public abstract class NetworkListener extends JedisPubSub {
             return;
         }
         RegisteredServer adminServer = adminServerOpt.get();
+        if (!adminServer.getServerInfo().getName().equals(data.get("adminServer").getAsString())) {
+            sendMessageToPlayer(adminOpt.get().getUsername(), "§cZmieniłeś sektor. Ponów przywołanie.");
+            return;
+        }
+        boolean operator = data.has("operator") && data.get("operator").isJsonPrimitive()
+                && data.getAsJsonPrimitive("operator").isBoolean() && data.get("operator").getAsBoolean();
+        boolean fromSpawn = spawnExitGate.onSpawn(target);
+        if (fromSpawn && !operator) {
+            sendMessageToPlayer(adminOpt.get().getUsername(), "§cTylko operator może przywołać gracza ze Spawnu.");
+            return;
+        }
+        TpaLocation.parse(adminLocation);
 
         String targetKey = "player:final_teleport_target:" + target.getUniqueId();
         String cleanupToken = UUID.randomUUID().toString();
@@ -536,7 +548,8 @@ public abstract class NetworkListener extends JedisPubSub {
                         return;
                     }
                     requestSaveThenTransfer(target, adminServer, adminName, null,
-                            targetKey, adminLocation.toString(), cleanupTokenKey, cleanupToken, cleanupToken);
+                             targetKey, adminLocation.toString(), cleanupTokenKey, cleanupToken, cleanupToken,
+                             fromSpawn && operator ? "admin-summon" : null);
                     logger.info("[Summon] Zlecono przeniesienie gracza {} do administratora {} na serwerze {}",
                             target.getUsername(), adminName, adminServer.getServerInfo().getName());
                 });
@@ -582,8 +595,8 @@ public abstract class NetworkListener extends JedisPubSub {
     private void handleTransfer(String message) {
         if (message == null || message.isBlank()) return;
         String[] data = message.split(":", 3);
-        if (data.length < 2 || (data.length == 3 && !"spawn-button".equals(data[2]))) return;
-        boolean spawnButton = data.length == 3;
+        if (data.length < 2 || (data.length == 3 && !isSpawnExitRoute(data[2]))) return;
+        boolean spawnExit = data.length == 3;
         UUID uuid;
         try {
             uuid = UUID.fromString(data[0]);
@@ -604,8 +617,8 @@ public abstract class NetworkListener extends JedisPubSub {
         proxy.getPlayer(uuid).ifPresent(player -> {
             destination.ifPresent(server -> {
                 boolean onSpawn = spawnExitGate.onSpawn(player);
-                if (spawnButton != onSpawn || (spawnButton && spawnExitGate.isSpawn(targetServerName))) return;
-                SpawnExitGate.Permit permit = spawnButton ? spawnExitGate.authorize(player, server) : null;
+                if (spawnExit != onSpawn || (spawnExit && spawnExitGate.isSpawn(targetServerName))) return;
+                SpawnExitGate.Permit permit = spawnExit ? spawnExitGate.authorize(player, server) : null;
                 player.createConnectionRequest(server).connect().whenComplete((result, error) -> {
                     if (permit != null) spawnExitGate.revoke(permit);
                     if (error != null || result == null || !result.isSuccessful()) {
@@ -635,21 +648,25 @@ public abstract class NetworkListener extends JedisPubSub {
         }
     }
 
+    static boolean isSpawnExitRoute(String route) {
+        return "spawn-button".equals(route) || "spawn-warmup".equals(route);
+    }
+
     private void requestSaveThenTransfer(Player player, RegisteredServer destination,
                                          String requesterName, String completionMessage,
                                          String cleanupKey, String cleanupValue,
                                          String cleanupTokenKey, String cleanupToken, String requestId) {
         requestSaveThenTransfer(player, destination, requesterName, completionMessage, cleanupKey, cleanupValue,
-                cleanupTokenKey, cleanupToken, requestId, false);
+                 cleanupTokenKey, cleanupToken, requestId, null);
     }
 
     private void requestSaveThenTransfer(Player player, RegisteredServer destination,
                                          String requesterName, String completionMessage,
                                          String cleanupKey, String cleanupValue,
                                          String cleanupTokenKey, String cleanupToken, String requestId,
-                                         boolean adminTeleport) {
+                                         String adminPurpose) {
         PendingTransfer pending = new PendingTransfer(player, destination, requesterName, completionMessage,
-                cleanupKey, cleanupValue, cleanupTokenKey, cleanupToken, adminTeleport);
+                cleanupKey, cleanupValue, cleanupTokenKey, cleanupToken, adminPurpose);
         UUID playerUuid = player.getUniqueId();
         CompletableFuture<Long> publication;
         synchronized (pendingTransferByPlayer) {
@@ -668,7 +685,7 @@ public abstract class NetworkListener extends JedisPubSub {
             JsonObject request = new JsonObject();
             request.addProperty("requestId", requestId);
             request.addProperty("uuid", playerUuid.toString());
-            if (adminTeleport) request.addProperty("purpose", "admin-tp");
+            if (adminPurpose != null) request.addProperty("purpose", adminPurpose);
             String saveRequestKey = "player:transfer_save_request:" + playerUuid;
             publication = transferRequestSequencer.submit(playerUuid, () -> redisManager.executeAsync(jedis ->
                             jedis.eval(PUBLISH_SAVE_REQUEST_SCRIPT,
@@ -812,7 +829,7 @@ public abstract class NetworkListener extends JedisPubSub {
             return;
         }
 
-        SpawnExitGate.Permit permit = pending.adminTeleport() && spawnExitGate.onSpawn(currentPlayer)
+        SpawnExitGate.Permit permit = pending.adminPurpose() != null && spawnExitGate.onSpawn(currentPlayer)
                 ? spawnExitGate.authorize(currentPlayer, pending.destination()) : null;
         currentPlayer.createConnectionRequest(pending.destination()).connect().whenComplete((result, error) -> {
             if (permit != null) spawnExitGate.revoke(permit);
