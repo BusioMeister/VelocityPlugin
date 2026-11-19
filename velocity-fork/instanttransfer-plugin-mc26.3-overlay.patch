@@ -11,7 +11,7 @@ index 79ccf93..663c032 100644
                  } catch (IllegalArgumentException e) {
                      getLogger().warning("[COORD] bad arrival payload: " + msg + " - " + e.getMessage());
 diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
-index 2451689..4d7ca5f 100644
+index 2451689..ed34b0f 100644
 --- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
 +++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
 @@ -142,8 +142,7 @@ public final class EntityIdRemapper implements PacketListener {
@@ -37,11 +37,10 @@ index 2451689..4d7ca5f 100644
  
              } else if (type == PacketType.Play.Server.SET_PASSENGERS) {
                  WrapperPlayServerSetPassengers w = new WrapperPlayServerSetPassengers(event);
-@@ -214,26 +213,13 @@ public final class EntityIdRemapper implements PacketListener {
-                 // (3-byte entity_position_sync) — wrapper path is banned on this network.
+@@ -215,25 +214,16 @@ public final class EntityIdRemapper implements PacketListener {
                  RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state);
  
--            } else if (type == PacketType.Play.Server.ENTITY_HEAD_LOOK) {
+             } else if (type == PacketType.Play.Server.ENTITY_HEAD_LOOK) {
 -                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
 -                WrapperPlayServerEntityHeadLook w = new WrapperPlayServerEntityHeadLook(event);
 -                remapSend(event, w.getEntityId(), w::setEntityId, state);
@@ -55,14 +54,16 @@ index 2451689..4d7ca5f 100644
 -                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
 -                WrapperPlayServerEntityRelativeMove w = new WrapperPlayServerEntityRelativeMove(event);
 -                remapSend(event, w.getEntityId(), w::setEntityId, state);
--
++                // The local player computes its own head yaw. Forward other players' head yaw
++                // byte-for-byte; never guess an entity id from the one-byte angle.
++                return;
+ 
 -            } else if (type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE_AND_ROTATION) {
 -                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
 -                WrapperPlayServerEntityRelativeMoveAndRotation w =
 -                        new WrapperPlayServerEntityRelativeMoveAndRotation(event);
 -                remapSend(event, w.getEntityId(), w::setEntityId, state);
-+            } else if (type == PacketType.Play.Server.ENTITY_HEAD_LOOK
-+                    || type == PacketType.Play.Server.ENTITY_ROTATION
++            } else if (type == PacketType.Play.Server.ENTITY_ROTATION
 +                    || type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE
 +                    || type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE_AND_ROTATION) {
 +                // Relative movement has a different payload in 26.3. Never re-encode it just
@@ -71,7 +72,7 @@ index 2451689..4d7ca5f 100644
  
              } else if (type == PacketType.Play.Server.SPAWN_ENTITY) {
                  // Do NOT rewrite SPAWN_ENTITY - backend assigns new entity IDs for mobs/items/etc.
-@@ -305,11 +291,6 @@ public final class EntityIdRemapper implements PacketListener {
+@@ -305,11 +295,6 @@ public final class EntityIdRemapper implements PacketListener {
              return;
          }
          event.setCancelled(true); // synthetic proxy->plugin signal, never meant for the client
@@ -83,7 +84,7 @@ index 2451689..4d7ca5f 100644
          String payload = new String(w.getData(), StandardCharsets.UTF_8);
          if (!verifyIdsHmac(payload, state)) {
              return;
-@@ -336,12 +317,17 @@ public final class EntityIdRemapper implements PacketListener {
+@@ -336,12 +321,17 @@ public final class EntityIdRemapper implements PacketListener {
          try {
              clientId = Integer.parseInt(parts[0]);
              backendId = Integer.parseInt(parts[1]);
@@ -106,6 +107,55 @@ index 2451689..4d7ca5f 100644
          } catch (NumberFormatException e) {
              logger.warn("[InstantTransfer] bad ids payload: {}", payload);
              return;
+diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/RawEntityIdRewriter.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/RawEntityIdRewriter.java
+index 96fc321..81f9f0b 100644
+--- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/RawEntityIdRewriter.java
++++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/RawEntityIdRewriter.java
+@@ -22,6 +22,28 @@ final class RawEntityIdRewriter {
+ 
+     private RawEntityIdRewriter() {}
+ 
++    /** PacketEvents 2.14 Velocity has already consumed the packet type before listeners run. */
++    static boolean rewriteSelfId(ByteBuf buf, SwitchState state) {
++        int start = buf.readerIndex();
++        int[] id = varIntSpan(buf, start);
++        if (id == null || readVarInt(buf, start) != state.backendEntityId()) return false;
++        byte[] original = snapshot(buf, start, buf.writerIndex());
++        int oldLength = id[1] - start;
++        try {
++            int newLength = 1;
++            for (int value = state.clientEntityId(); (value & ~0x7F) != 0; value >>>= 7) newLength++;
++            buf.ensureWritable(Math.max(0, newLength - oldLength));
++            buf.writerIndex(start);
++            writeVarInt(buf, state.clientEntityId());
++            buf.writeBytes(original, oldLength, original.length - oldLength);
++            return true;
++        } catch (RuntimeException error) {
++            buf.setBytes(start, original);
++            buf.writerIndex(start + original.length);
++            return false;
++        }
++    }
++
+     /**
+      * Attempts an in-place rewrite backendId -> clientId.
+      *
+@@ -29,7 +51,7 @@ final class RawEntityIdRewriter {
+      *         wrapper owns it, so nothing re-encodes), false when untouched (id not ours,
+      *         unreadable, or any anomaly — original bytes restored).
+      */
+-    static boolean rewriteSelfId(ByteBuf buf, SwitchState state) {
++    static boolean rewriteLegacyBuffer(ByteBuf buf, SwitchState state) {
+         final int readerIndex = buf.readerIndex();
+         final int writerIndex = buf.writerIndex();
+         final byte[] original = snapshot(buf, readerIndex, writerIndex);
+@@ -139,4 +161,4 @@ final class RawEntityIdRewriter {
+         }
+         buf.writeByte(value);
+     }
+-}
+\ No newline at end of file
++}
 diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
 index 8849cc2..2b3eb08 100644
 --- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
@@ -497,6 +547,48 @@ index 86f5b4a..20adac6 100644
          teleportSeen = false;
          targetChunkKnown = false;
          arrivalPositionKnown = false;
+diff --git a/proxy-plugin/src/test/java/fr/cupcode/instanttransfer/packet/RawEntityIdRewriterTest.java b/proxy-plugin/src/test/java/fr/cupcode/instanttransfer/packet/RawEntityIdRewriterTest.java
+index 0bd328e..033b1c4 100644
+--- a/proxy-plugin/src/test/java/fr/cupcode/instanttransfer/packet/RawEntityIdRewriterTest.java
++++ b/proxy-plugin/src/test/java/fr/cupcode/instanttransfer/packet/RawEntityIdRewriterTest.java
+@@ -45,20 +45,23 @@ class RawEntityIdRewriterTest {
+     }
+ 
+     @Test
+-    void rewritesWithPidPrefix() throws Exception {
+-        var buf = Unpooled.buffer();
+-        writeVarInt(buf, 0x5B);        // packet id (2-byte varint to exercise length shift)
+-        buf.writeByte(0xE0);           // continuation byte of the 2-byte pid varint... simplified
+-        buf.resetReaderIndex().resetWriterIndex();
+-        writeVarInt(buf, 200);         // packet id (2-byte varint)
+-        writeVarInt(buf, 21);          // entity id
+-        buf.writeZero(6);
+-        boolean ok = RawEntityIdRewriter.rewriteSelfId(buf, state(21, 7));
+-        if (!ok) { System.out.println("rewrite failed: " + RawEntityIdRewriter.lastFailure()); }
+-        assertTrue(ok);
+-        assertEquals(200, LeadingVarInt.peek(buf, 0));          // pid untouched
+-        assertEquals(7, LeadingVarInt.peek(buf, 2));            // rewritten id after 2-byte pid
+-        assertEquals(9, buf.writerIndex());                     // grew by length delta
++    void neverMistakesAnotherPlayersAngleForOurEntityId() throws Exception {
++        var buf = Unpooled.buffer().writeByte(5).writeByte(0x7f).writeByte(21);
++        buf.readerIndex(1); // PacketEvents consumed the packet type, leaving ID 127 + angle 21.
++        assertFalse(RawEntityIdRewriter.rewriteSelfId(buf, state(21, 501)));
++        assertEquals(3, buf.writerIndex());
++        assertEquals(21, buf.getUnsignedByte(2));
++    }
++
++    @Test
++    void expandsOnlyTheEntityIdEvenWhenThePayloadMatchesIt() throws Exception {
++        var buf = Unpooled.buffer().writeByte(5).writeByte(21).writeByte(21);
++        buf.readerIndex(1);
++        assertTrue(RawEntityIdRewriter.rewriteSelfId(buf, state(21, 501)));
++        assertEquals(5, buf.getUnsignedByte(0));
++        assertEquals(501, LeadingVarInt.peek(buf, 0));
++        assertEquals(4, buf.writerIndex());
++        assertEquals(21, buf.getUnsignedByte(3));
+     }
+ 
+     @Test
 diff --git a/proxy-plugin/src/test/java/fr/cupcode/instanttransfer/switching/PlayerLoadedHandshakeTest.java b/proxy-plugin/src/test/java/fr/cupcode/instanttransfer/switching/PlayerLoadedHandshakeTest.java
 new file mode 100644
 index 0000000..e669856

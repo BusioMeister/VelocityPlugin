@@ -36,6 +36,10 @@ commit `74e1be2b0fb798b24e74ec9496f99baf8e7aa190`, wskazany przez Bifu.
   chunka lądowania i prawidłowym potwierdzeniu teleportu przez klienta.
   Bez tego Paper ignoruje początkowy ruch, bo klient nie otworzył ekranu
   i sam nie rozpoczął nowego cyklu ładowania.
+  Remapper 26.3 używa dokładnego początku treści pakietu wskazanego przez
+  PacketEvents, zamiast szukać identyfikatora w danych encji. `rotate_head`
+  jest przepuszczany bez zmian. Test `--two-clients` sprawdza też wejście
+  na Spawn, gdy inny gracz jest obok i obraca głowę.
 - W teście użyto PacketEvents **2.14.0**, które dodaje obsługę 26.3.
   Plugin proxy zbudowano przez `mvn -Dvelocity.version=4.3.1 -Dpacketevents.version=2.14.0 verify`.
   Agent Paper używa nieshade'owanego oryginału JAR + zewnętrznego PacketEvents,
