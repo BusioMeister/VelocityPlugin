@@ -57,8 +57,14 @@ public abstract class NetworkListener extends JedisPubSub {
 
     private record PendingTransfer(Player player, RegisteredServer destination,
                                    String requesterName, String completionMessage,
-                                   String cleanupKey, String cleanupValue,
-                                   String cleanupTokenKey, String cleanupToken) { }
+                                   String cleanupKey, String cleanupValue, String cleanupTokenKey,
+                                   String cleanupToken, boolean adminTeleport) {
+        PendingTransfer(Player player, RegisteredServer destination, String requesterName, String completionMessage,
+                        String cleanupKey, String cleanupValue, String cleanupTokenKey, String cleanupToken) {
+            this(player, destination, requesterName, completionMessage, cleanupKey, cleanupValue,
+                    cleanupTokenKey, cleanupToken, false);
+        }
+    }
 
 
     public NetworkListener(ProxyServer proxy, RedisManager redisManager, MongoDBManager mongoDBManager,
@@ -245,6 +251,12 @@ public abstract class NetworkListener extends JedisPubSub {
         String cleanupTokenKey = targetKey + ":request";
         Player admin = adminOpt.get();
         RegisteredServer targetServer = targetServerOpt.get();
+        UUID targetId = UUID.fromString(data.get("targetUUID").getAsString());
+        if (proxy.getPlayer(targetId).flatMap(Player::getCurrentServer)
+                .filter(connection -> connection.getServer().equals(targetServer)).isEmpty()) {
+            admin.sendMessage(lc("§cGracz zmienił sektor. Spróbuj ponownie."));
+            return;
+        }
         storePendingTargetAsync(targetKey, locationJson.toString(), cleanupTokenKey, cleanupToken)
                 .whenComplete((ignored, error) -> {
                     if (proxy.getPlayer(admin.getUniqueId()).orElse(null) != admin) {
@@ -258,7 +270,7 @@ public abstract class NetworkListener extends JedisPubSub {
                         return;
                     }
                     requestSaveThenTransfer(admin, targetServer, admin.getUsername(), null,
-                            targetKey, locationJson.toString(), cleanupTokenKey, cleanupToken, cleanupToken);
+                             targetKey, locationJson.toString(), cleanupTokenKey, cleanupToken, cleanupToken, true);
                     logger.info("[TP] Zlecono zapis przed przeniesieniem admina {} na serwer {}",
                             admin.getUsername(), targetServerName);
                 });
@@ -627,8 +639,17 @@ public abstract class NetworkListener extends JedisPubSub {
                                          String requesterName, String completionMessage,
                                          String cleanupKey, String cleanupValue,
                                          String cleanupTokenKey, String cleanupToken, String requestId) {
+        requestSaveThenTransfer(player, destination, requesterName, completionMessage, cleanupKey, cleanupValue,
+                cleanupTokenKey, cleanupToken, requestId, false);
+    }
+
+    private void requestSaveThenTransfer(Player player, RegisteredServer destination,
+                                         String requesterName, String completionMessage,
+                                         String cleanupKey, String cleanupValue,
+                                         String cleanupTokenKey, String cleanupToken, String requestId,
+                                         boolean adminTeleport) {
         PendingTransfer pending = new PendingTransfer(player, destination, requesterName, completionMessage,
-                cleanupKey, cleanupValue, cleanupTokenKey, cleanupToken);
+                cleanupKey, cleanupValue, cleanupTokenKey, cleanupToken, adminTeleport);
         UUID playerUuid = player.getUniqueId();
         CompletableFuture<Long> publication;
         synchronized (pendingTransferByPlayer) {
@@ -647,6 +668,7 @@ public abstract class NetworkListener extends JedisPubSub {
             JsonObject request = new JsonObject();
             request.addProperty("requestId", requestId);
             request.addProperty("uuid", playerUuid.toString());
+            if (adminTeleport) request.addProperty("purpose", "admin-tp");
             String saveRequestKey = "player:transfer_save_request:" + playerUuid;
             publication = transferRequestSequencer.submit(playerUuid, () -> redisManager.executeAsync(jedis ->
                             jedis.eval(PUBLISH_SAVE_REQUEST_SCRIPT,
@@ -790,7 +812,10 @@ public abstract class NetworkListener extends JedisPubSub {
             return;
         }
 
+        SpawnExitGate.Permit permit = pending.adminTeleport() && spawnExitGate.onSpawn(currentPlayer)
+                ? spawnExitGate.authorize(currentPlayer, pending.destination()) : null;
         currentPlayer.createConnectionRequest(pending.destination()).connect().whenComplete((result, error) -> {
+            if (permit != null) spawnExitGate.revoke(permit);
             Player stillCurrent = proxy.getPlayer(currentPlayer.getUniqueId()).orElse(null);
             if (stillCurrent != currentPlayer) {
                 cleanupPendingTarget(pending);
