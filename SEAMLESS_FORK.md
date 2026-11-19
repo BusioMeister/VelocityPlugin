@@ -32,13 +32,23 @@ commit `74e1be2b0fb798b24e74ec9496f99baf8e7aa190`, wskazany przez Bifu.
   wymusza lotu przy lądowaniu ani nie nadpisuje później umiejętności: wysyła
   tryb gry przed pakietem umiejętności z Paper. Agent nie przyznaje
   tymczasowego prawa lotu w odpowiedzi na `arrival`.
+  Na 26.3 proxy wysyła `PlayerLoaded` do nowego Paper dopiero po dostarczeniu
+  chunka lądowania i prawidłowym potwierdzeniu teleportu przez klienta.
+  Bez tego Paper ignoruje początkowy ruch, bo klient nie otworzył ekranu
+  i sam nie rozpoczął nowego cyklu ładowania.
 - W teście użyto PacketEvents **2.14.0**, które dodaje obsługę 26.3.
   Plugin proxy zbudowano przez `mvn -Dvelocity.version=4.3.1 -Dpacketevents.version=2.14.0 verify`.
   Agent Paper używa nieshade'owanego oryginału JAR + zewnętrznego PacketEvents,
   aby nie korzystać z osadzonego API 2.13.0. Oba JAR-y są potrzebne na
   każdym backendzie uczestniczącym w InstantTransfer, w tym na `Spawn`.
 - `tools/runtime/instant_transfer_lab.py`: osobne kopie mapy, porty
-  `25575–25577`, oficjalny klient 26.3, bez dotykania aktywnego proxy.
+  `25575–25578`, oficjalny klient 26.3, bez dotykania aktywnego proxy.
+  `--sector-platform` uruchamia pełne aiSector z osobnymi Redis i Mongo.
+  Kładzie ciągłą platformę `50×50` na `Y=140` na obu kopiach, robi zrzuty
+  widocznego bordera i sprawdza ruch gracza z klawiatury. Po przejściu
+  odczytuje pozycję z docelowego Paper, żeby wykryć zatrzymanie, cofnięcie
+  i upadek z platformy. Pierwsza pełna seria: cztery przejścia plus
+  `/spawn` i przycisk, tylko `PLAY`; `instant-263-smoke-j7gpaspl/results.json`.
   Po poprawce oba przełączenia `/server` zarejestrowały wyłącznie `0 PLAY`
   (brak obu ekranów i rozłączenia). 36 testów jednostkowych InstantTransfer
   zaliczonych. Dowody: `instant-263-smoke-swd4v_ir/results.json` pod `%LOCALAPPDATA%/Temp/opencode`.

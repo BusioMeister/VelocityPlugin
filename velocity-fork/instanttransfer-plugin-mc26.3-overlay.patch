@@ -11,10 +11,20 @@ index 79ccf93..663c032 100644
                  } catch (IllegalArgumentException e) {
                      getLogger().warning("[COORD] bad arrival payload: " + msg + " - " + e.getMessage());
 diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
-index 2451689..870d487 100644
+index 2451689..4d7ca5f 100644
 --- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
 +++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
-@@ -178,9 +178,9 @@ public final class EntityIdRemapper implements PacketListener {
+@@ -142,8 +142,7 @@ public final class EntityIdRemapper implements PacketListener {
+                 remapSend(event, w.getEntityId(), w::setEntityId, state);
+ 
+             } else if (type == PacketType.Play.Server.UPDATE_ATTRIBUTES) {
+-                WrapperPlayServerUpdateAttributes w = new WrapperPlayServerUpdateAttributes(event);
+-                remapSend(event, w.getEntityId(), w::setEntityId, state);
++                RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state);
+ 
+             } else if (type == PacketType.Play.Server.HURT_ANIMATION) {
+                 if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
+@@ -178,9 +177,9 @@ public final class EntityIdRemapper implements PacketListener {
                  RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state);
  
              } else if (type == PacketType.Play.Server.ENTITY_EQUIPMENT) {
@@ -27,7 +37,41 @@ index 2451689..870d487 100644
  
              } else if (type == PacketType.Play.Server.SET_PASSENGERS) {
                  WrapperPlayServerSetPassengers w = new WrapperPlayServerSetPassengers(event);
-@@ -305,11 +305,6 @@ public final class EntityIdRemapper implements PacketListener {
+@@ -214,26 +213,13 @@ public final class EntityIdRemapper implements PacketListener {
+                 // (3-byte entity_position_sync) — wrapper path is banned on this network.
+                 RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state);
+ 
+-            } else if (type == PacketType.Play.Server.ENTITY_HEAD_LOOK) {
+-                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
+-                WrapperPlayServerEntityHeadLook w = new WrapperPlayServerEntityHeadLook(event);
+-                remapSend(event, w.getEntityId(), w::setEntityId, state);
+-
+-            } else if (type == PacketType.Play.Server.ENTITY_ROTATION) {
+-                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
+-                WrapperPlayServerEntityRotation w = new WrapperPlayServerEntityRotation(event);
+-                remapSend(event, w.getEntityId(), w::setEntityId, state);
+-
+-            } else if (type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE) {
+-                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
+-                WrapperPlayServerEntityRelativeMove w = new WrapperPlayServerEntityRelativeMove(event);
+-                remapSend(event, w.getEntityId(), w::setEntityId, state);
+-
+-            } else if (type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE_AND_ROTATION) {
+-                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
+-                WrapperPlayServerEntityRelativeMoveAndRotation w =
+-                        new WrapperPlayServerEntityRelativeMoveAndRotation(event);
+-                remapSend(event, w.getEntityId(), w::setEntityId, state);
++            } else if (type == PacketType.Play.Server.ENTITY_HEAD_LOOK
++                    || type == PacketType.Play.Server.ENTITY_ROTATION
++                    || type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE
++                    || type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE_AND_ROTATION) {
++                // Relative movement has a different payload in 26.3. Never re-encode it just
++                // to change the leading entity id (observed truncated move_entity_pos packets).
++                RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state);
+ 
+             } else if (type == PacketType.Play.Server.SPAWN_ENTITY) {
+                 // Do NOT rewrite SPAWN_ENTITY - backend assigns new entity IDs for mobs/items/etc.
+@@ -305,11 +291,6 @@ public final class EntityIdRemapper implements PacketListener {
              return;
          }
          event.setCancelled(true); // synthetic proxy->plugin signal, never meant for the client
@@ -39,7 +83,7 @@ index 2451689..870d487 100644
          String payload = new String(w.getData(), StandardCharsets.UTF_8);
          if (!verifyIdsHmac(payload, state)) {
              return;
-@@ -336,12 +331,17 @@ public final class EntityIdRemapper implements PacketListener {
+@@ -336,12 +317,17 @@ public final class EntityIdRemapper implements PacketListener {
          try {
              clientId = Integer.parseInt(parts[0]);
              backendId = Integer.parseInt(parts[1]);
@@ -63,7 +107,7 @@ index 2451689..870d487 100644
              logger.warn("[InstantTransfer] bad ids payload: {}", payload);
              return;
 diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
-index 8849cc2..1a8577e 100644
+index 8849cc2..2b3eb08 100644
 --- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
 +++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/SeamlessPacketListener.java
 @@ -104,7 +104,10 @@ public final class SeamlessPacketListener implements PacketListener {
@@ -87,7 +131,16 @@ index 8849cc2..1a8577e 100644
                      }
                  } else {
                      // Unknown slicing/era: pay the wrapper cost rather than lose tracking accuracy.
-@@ -224,6 +229,11 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -215,6 +220,8 @@ public final class SeamlessPacketListener implements PacketListener {
+                 }
+                 if (state.guardActive() && state.teleportSeen() && state.targetChunkKnown()
+                         && cx == state.targetChunkX() && cz == state.targetChunkZ()) {
++                    state.markDestinationChunkDelivered();
++                    notifyPlayerLoaded(user, state);
+                     release(user, state, "arrival chunk delivered");
+                     return;
+                 }
+@@ -224,6 +231,11 @@ public final class SeamlessPacketListener implements PacketListener {
                  // forward none); it defines the entity id the client keeps for its whole session.
                  WrapperPlayServerJoinGame w = new WrapperPlayServerJoinGame(event);
                  state.entityIds(w.getEntityId(), w.getEntityId());
@@ -99,7 +152,7 @@ index 8849cc2..1a8577e 100644
                  state.clientDimension(dimensionKey(w.getDimensionTypeRef(),
                          state.adapter(() -> ProtocolAdapter.forClientVersion(user.getClientVersion()))));
                  state.markNewServerTalking(); // safety: patch disabled → vanilla switch path
-@@ -375,11 +385,15 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -375,11 +387,15 @@ public final class SeamlessPacketListener implements PacketListener {
                  state.ghostWindowId(-1);
  
              } else if (type == PacketType.Play.Server.PLAYER_ABILITIES) {
@@ -115,7 +168,7 @@ index 8849cc2..1a8577e 100644
                  // Self teleport: bound tracking memory (spec P4) — scan only when meaningfully large.
                  if (state.loadedChunks().size() > 1024) {
                      WrapperPlayServerPlayerPositionAndLook w =
-@@ -387,20 +401,12 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -387,20 +403,12 @@ public final class SeamlessPacketListener implements PacketListener {
                      LoadedChunkPruner.prune(state.loadedChunks(),
                              (int) Math.floor(w.getX()) >> 4, (int) Math.floor(w.getZ()) >> 4, 32);
                  }
@@ -137,7 +190,7 @@ index 8849cc2..1a8577e 100644
          } catch (Exception e) {
              if (config.debug()) {
                  logger.warn("[InstantTransfer] listener error on {}: {}", type, e.toString());
-@@ -420,6 +426,16 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -420,6 +428,17 @@ public final class SeamlessPacketListener implements PacketListener {
          if (state.suppressListener()) {
              return;
          }
@@ -146,6 +199,7 @@ index 8849cc2..1a8577e 100644
 +            if (pc == PacketType.Play.Client.TELEPORT_CONFIRM) {
 +                state.acknowledgeArrival(new com.github.retrooper.packetevents.wrapper.play.client
 +                        .WrapperPlayClientTeleportConfirm(event).getTeleportId());
++                notifyPlayerLoaded(user, state);
 +            } else {
 +                event.setCancelled(true);
 +            }
@@ -154,7 +208,7 @@ index 8849cc2..1a8577e 100644
          // The player closed the GUI themselves (ESC also closes the old server's window mid-switch).
          int windowId = new WrapperPlayClientCloseWindow(event).getWindowId();
          if (windowId == state.openWindowId()) {
-@@ -459,6 +475,7 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -459,6 +478,7 @@ public final class SeamlessPacketListener implements PacketListener {
          }
          // Cross-dimension: the client rebuilt its level from scratch; nothing old survives.
          // (Scoreboard tracking is intentionally kept: it is connection-scoped client-side.)
@@ -162,7 +216,7 @@ index 8849cc2..1a8577e 100644
          state.loadedChunks().clear();
          state.trackedEntities().clear();
          state.ghostEntities().clear();
-@@ -599,13 +616,25 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -599,13 +619,25 @@ public final class SeamlessPacketListener implements PacketListener {
       */
      private void onArrivalTeleport(PacketSendEvent event, User user, SwitchState state) {
          WrapperPlayServerPlayerPositionAndLook w = new WrapperPlayServerPlayerPositionAndLook(event);
@@ -190,7 +244,13 @@ index 8849cc2..1a8577e 100644
          if (absolute) {
              int cx = (int) Math.floor(w.getX()) >> 4;
              int cz = (int) Math.floor(w.getZ()) >> 4;
-@@ -617,18 +646,6 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -613,22 +645,12 @@ public final class SeamlessPacketListener implements PacketListener {
+             long key = SwitchState.chunkKey(cx, cz);
+             // Already have the REAL new chunk (preloaded fast path)? Then no freeze is needed.
+             if (state.loadedChunks().contains(key) && !state.ghostChunks().contains(key)) {
++                state.markDestinationChunkDelivered();
++                notifyPlayerLoaded(user, state);
+                 release(user, state, "arrival chunk already loaded");
                  return;
              }
          }
@@ -209,7 +269,7 @@ index 8849cc2..1a8577e 100644
      }
  
      /** Finish the switch exactly once: un-freeze, then remove the previous server's ghosts. */
-@@ -636,28 +653,7 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -636,28 +658,7 @@ public final class SeamlessPacketListener implements PacketListener {
          if (!state.finishGuard()) {
              return;
          }
@@ -239,7 +299,7 @@ index 8849cc2..1a8577e 100644
  
          Set<Integer> ghostEntities = state.ghostEntities();
          Set<Long> ghostChunks = state.ghostChunks();
-@@ -670,12 +666,18 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -670,12 +671,18 @@ public final class SeamlessPacketListener implements PacketListener {
              state.trackedEntities().removeAll(ghostEntities);
          }
          int chunkCount = ghostChunks.size();
@@ -263,7 +323,7 @@ index 8849cc2..1a8577e 100644
  
          // Effects from the previous server the new one did not re-apply: clear their client display.
          Map<String, PotionType> ghostEffects = state.ghostEffects();
-@@ -819,52 +821,6 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -819,52 +826,6 @@ public final class SeamlessPacketListener implements PacketListener {
          logger.debug("[InstantTransfer] flushed {} deferred chunk unloads", keys.length);
      }
  
@@ -316,10 +376,24 @@ index 8849cc2..1a8577e 100644
      private void fireTransferTimeout(User user) {
          UUID uuid = user.getUUID();
          Player player = plugin.getProxy().getPlayer(uuid).orElse(null);
-@@ -878,6 +834,15 @@ public final class SeamlessPacketListener implements PacketListener {
+@@ -878,6 +839,29 @@ public final class SeamlessPacketListener implements PacketListener {
          );
      }
  
++    private void notifyPlayerLoaded(User user, SwitchState state) {
++        if (!state.canNotifyPlayerLoaded()) return;
++        long generation = state.switchGeneration();
++        var channel = (io.netty.channel.Channel) user.getChannel();
++        // Wait until the real teleport acknowledgement has passed through Velocity. The vanilla
++        // client's LevelLoadTracker will not send PlayerLoaded because we intentionally kept PLAY.
++        channel.eventLoop().execute(() -> {
++            if (!channel.isActive() || generation != state.switchGeneration() || !state.canNotifyPlayerLoaded()) return;
++            user.receivePacketSilently(new com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerLoaded());
++            state.markPlayerLoadedSent();
++            if (config.debug()) logger.info("[InstantTransfer] sent PlayerLoaded for {}", user.getName());
++        });
++    }
++
 +    private void syncPendingGamemode(User user, SwitchState state) {
 +        int gamemode = state.pendingGamemode();
 +        if (gamemode < 0) return;
@@ -374,33 +448,47 @@ index 63e19ae..e0466fa 100644
 \ No newline at end of file
 +}
 diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java
-index 86f5b4a..cd66f0f 100644
+index 86f5b4a..20adac6 100644
 --- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java
 +++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/switching/SwitchState.java
-@@ -109,6 +109,22 @@ public final class SwitchState {
+@@ -109,6 +109,36 @@ public final class SwitchState {
  
      /** Wall-clock time the guard was armed / the teleport was seen, for the timeout safety net. */
      private volatile long guardArmedAt = 0L;
 +    private long switchGeneration;
 +    private boolean waitingForArrivalAck;
 +    private Integer arrivalTeleportId;
++    private boolean arrivalAcknowledged;
++    private boolean destinationChunkDelivered;
++    private boolean playerLoadedSent;
 +
 +    public long switchGeneration() { return switchGeneration; }
 +    public void invalidateChunkCleanup() {
 +        switchGeneration++;
 +        waitingForArrivalAck = false;
 +        arrivalTeleportId = null;
++        arrivalAcknowledged = false;
++        destinationChunkDelivered = false;
++        playerLoadedSent = false;
 +    }
 +    public boolean waitingForArrivalAck() { return waitingForArrivalAck; }
 +    public void awaitArrivalAck(int id) { arrivalTeleportId = id; }
 +    public void acknowledgeArrival(int id) {
-+        if (arrivalTeleportId != null && arrivalTeleportId == id) stopWaitingForArrivalAck();
++        if (arrivalTeleportId != null && arrivalTeleportId == id) {
++            arrivalAcknowledged = true;
++            stopWaitingForArrivalAck();
++        }
 +    }
 +    public void stopWaitingForArrivalAck() { waitingForArrivalAck = false; }
++    public void markDestinationChunkDelivered() { destinationChunkDelivered = true; }
++    public boolean canNotifyPlayerLoaded() {
++        return arrivalAcknowledged && destinationChunkDelivered && !playerLoadedSent;
++    }
++    public void markPlayerLoadedSent() { playerLoadedSent = true; }
  
      /** True once the arrival PLAYER_POSITION_AND_LOOK has been seen (and the freeze injected). */
      private boolean teleportSeen = false;
-@@ -197,6 +213,8 @@ public final class SwitchState {
+@@ -197,6 +227,8 @@ public final class SwitchState {
      public ProtocolAdapter adapterIfResolved() { return adapter; }
  
      public void armGuard(long nowMillis) {
@@ -409,3 +497,45 @@ index 86f5b4a..cd66f0f 100644
          teleportSeen = false;
          targetChunkKnown = false;
          arrivalPositionKnown = false;
+diff --git a/proxy-plugin/src/test/java/fr/cupcode/instanttransfer/switching/PlayerLoadedHandshakeTest.java b/proxy-plugin/src/test/java/fr/cupcode/instanttransfer/switching/PlayerLoadedHandshakeTest.java
+new file mode 100644
+index 0000000..e669856
+--- /dev/null
++++ b/proxy-plugin/src/test/java/fr/cupcode/instanttransfer/switching/PlayerLoadedHandshakeTest.java
+@@ -0,0 +1,36 @@
++package fr.cupcode.instanttransfer.switching;
++
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++class PlayerLoadedHandshakeTest {
++    @Test
++    void waitsForBothTheDestinationChunkAndTheCorrectTeleportAck() {
++        SwitchState state = new SwitchState();
++        state.armGuard(100);
++        state.awaitArrivalAck(6);
++        state.markDestinationChunkDelivered();
++        state.acknowledgeArrival(5);
++        assertFalse(state.canNotifyPlayerLoaded());
++        state.acknowledgeArrival(6);
++        assertTrue(state.canNotifyPlayerLoaded());
++        state.markPlayerLoadedSent();
++        assertFalse(state.canNotifyPlayerLoaded());
++    }
++
++    @Test
++    void anAckBeforeTheChunkAlsoWorksAndDoesNotLeakIntoTheNextSwitch() {
++        SwitchState state = new SwitchState();
++        state.armGuard(100);
++        state.awaitArrivalAck(7);
++        state.acknowledgeArrival(7);
++        assertFalse(state.canNotifyPlayerLoaded());
++        state.markDestinationChunkDelivered();
++        assertTrue(state.canNotifyPlayerLoaded());
++        state.armGuard(200);
++        state.markDestinationChunkDelivered();
++        assertFalse(state.canNotifyPlayerLoaded());
++    }
++}
