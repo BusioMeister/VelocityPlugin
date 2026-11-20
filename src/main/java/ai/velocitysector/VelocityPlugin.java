@@ -8,6 +8,7 @@ import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.plugin.Plugin;
+import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.scheduler.ScheduledTask;
 import net.kyori.adventure.text.Component;
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.math.BigDecimal;
+import java.nio.file.Path;
 
 @Plugin(id = "velocitysector", name = "VelocitySector", version = "2.0.0", description = "Plugin zarządzający przenoszeniem graczy między sektorami")
 public class VelocityPlugin {
@@ -23,6 +25,7 @@ public class VelocityPlugin {
 
     private final ProxyServer proxy;
     private final Logger logger;
+    private final Path dataDirectory;
 
     private RedisManager redisManager;
     private MongoDBManager mongoDBManager;
@@ -37,14 +40,18 @@ public class VelocityPlugin {
     private final Map<String, String> lastMessagerMap = new ConcurrentHashMap<>();
 
     @Inject
-    public VelocityPlugin(ProxyServer proxy, Logger logger) {
+    public VelocityPlugin(ProxyServer proxy, Logger logger, @DataDirectory Path dataDirectory) {
         this.proxy = proxy;
         this.logger = logger;
+        this.dataDirectory = dataDirectory;
     }
 
     @Subscribe
     public void onProxyInitialize(ProxyInitializeEvent event) {
         logger.info("VelocitySector Plugin został uruchomiony!");
+        ServerListMotd motd = new ServerListMotd(dataDirectory, logger);
+        proxy.getEventManager().register(this, motd);
+        proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("motd").plugin(this).build(), motd);
         String redisHost = System.getProperty("aisector.redis.host",
                 System.getenv().getOrDefault("AISECTOR_REDIS_HOST", "127.0.0.1"));
         int redisPort = Integer.parseInt(System.getProperty("aisector.redis.port",

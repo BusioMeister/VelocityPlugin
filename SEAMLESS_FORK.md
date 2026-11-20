@@ -94,3 +94,19 @@ wdrażać tego na produkcji na podstawie samego lokalnego smoke.
    wielu przejściach; dodatkowo test rozłączenia i odrzucenia celu.
 
 Nie podmieniać działającego proxy na samą diagnostykę.
+## MOTD listy serwerów
+
+VelocitySector pokazuje dwie linie MOTD niezależnie od whitelisty. Zmiany są
+widoczne po odświeżeniu listy, bez restartu proxy:
+
+```text
+/motd show
+/motd set <gradient:#ff3838:#ffca55:#ff3838><bold>LASTPLAY.NET</bold></gradient> | <gold>Już wkrótce!</gold>
+/motd reset
+```
+
+Operatorzy proxy mogą nadać `aisector.motd.manage` lub dodać UUID (jeden na
+linię) w `plugins/velocitysector/motd-admins.txt`, czytanym przy starcie.
+Konsola nie wymaga nadania uprawnień. Plugin zapisuje tekst w
+`plugins/velocitysector/motd.txt`. Obsługa kolorów RGB i gradientów korzysta
+z [Adventure MiniMessage](https://docs.advntr.dev/minimessage/format.html).
