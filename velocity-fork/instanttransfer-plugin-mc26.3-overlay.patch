@@ -11,9 +11,18 @@ index 79ccf93..663c032 100644
                  } catch (IllegalArgumentException e) {
                      getLogger().warning("[COORD] bad arrival payload: " + msg + " - " + e.getMessage());
 diff --git a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
-index 2451689..ed34b0f 100644
+index 2451689..8aed83f 100644
 --- a/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
 +++ b/proxy-plugin/src/main/java/fr/cupcode/instanttransfer/packet/EntityIdRemapper.java
+@@ -67,7 +67,7 @@ public final class EntityIdRemapper implements PacketListener {
+ 
+     private static final EnumSet<PacketType.Play.Server> SEND_TRACKED = EnumSet.of(
+             PacketType.Play.Server.PLUGIN_MESSAGE,
+-            PacketType.Play.Server.ENTITY_STATUS,
++            PacketType.Play.Server.ENTITY_STATUS, PacketType.Play.Server.ENTITY_VELOCITY,
+             PacketType.Play.Server.ENTITY_EFFECT, PacketType.Play.Server.REMOVE_ENTITY_EFFECT,
+             PacketType.Play.Server.UPDATE_ATTRIBUTES, PacketType.Play.Server.HURT_ANIMATION,
+             PacketType.Play.Server.DAMAGE_EVENT, PacketType.Play.Server.ENTITY_ANIMATION,
 @@ -142,8 +142,7 @@ public final class EntityIdRemapper implements PacketListener {
                  remapSend(event, w.getEntityId(), w::setEntityId, state);
  
