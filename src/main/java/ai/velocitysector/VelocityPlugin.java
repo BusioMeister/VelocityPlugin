@@ -96,6 +96,8 @@ public class VelocityPlugin {
 
 
         proxy.getChannelRegistrar().register(VelocityGlobalChat.CHANNEL);
+        proxy.getChannelRegistrar().register(FixedTabLayout.CHANNEL);
+        proxy.getEventManager().register(this, new FixedTabLayout());
         proxy.getEventManager().register(this, spawnExitGate);
         proxy.getEventManager().register(this,
                 new PlayerDisconnectListener(playerSectorPersistence, logger, tpaRequests, networkListener));
