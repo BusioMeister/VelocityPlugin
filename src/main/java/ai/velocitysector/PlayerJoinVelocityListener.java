@@ -4,9 +4,14 @@ import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.EventTask;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent;
+import com.velocitypowered.api.event.player.ServerPostConnectEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.slf4j.Logger;
 
 import java.util.UUID;
@@ -59,6 +64,18 @@ public final class PlayerJoinVelocityListener {
                     }
                 });
         });
+    }
+
+    @Subscribe
+    public void onFirstBackendConnected(ServerPostConnectEvent event) {
+        if (event.getPreviousServer() != null) return;
+        Player player = event.getPlayer();
+        player.sendMessage(Component.text("✦ ", TextColor.color(0xff3838))
+                .append(Component.text("Witaj, ", NamedTextColor.GRAY))
+                .append(Component.text(player.getUsername(), NamedTextColor.WHITE))
+                .append(Component.text("! Dobrze, że jesteś na ", NamedTextColor.GRAY))
+                .append(Component.text("LastPlay.net", TextColor.color(0xffca55), TextDecoration.BOLD))
+                .append(Component.text(". Miłej gry!", NamedTextColor.GRAY)));
     }
 
     @Subscribe
