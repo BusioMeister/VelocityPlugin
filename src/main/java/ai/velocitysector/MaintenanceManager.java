@@ -55,8 +55,8 @@ public final class MaintenanceManager {
         task = proxy.getScheduler().buildTask(plugin, () -> {
             if (countdownVersion.get() != thisCountdown) return;
             int left = Math.max(0, total - (int) ((System.currentTimeMillis() - start) / 1000));
-            String title = "§cPrzerwa techniczna";
-            String subtitle = "§7Start za §f" + left;
+            String title = Messages.text("maintenance-manager.przerwa-techniczna");
+            String subtitle = Messages.text("maintenance-manager.start-za", left);
             proxy.getAllPlayers().forEach(player -> player.showTitle(Title.title(
                     Component.text(title),
                     Component.text(subtitle),
@@ -125,7 +125,7 @@ public final class MaintenanceManager {
                 proxy.getAllPlayers().forEach(player -> {
                     if (!keep.contains(player.getUniqueId())
                             && !player.hasPermission("aisector.maintenance.bypass")) {
-                        player.disconnect(Component.text("§cPrzerwa techniczna\n§7Whitelista jest włączona."));
+                        player.disconnect(Component.text(Messages.text("maintenance-manager.przerwa-techniczna-whitelista-jest-wlaczona")));
                     }
                 });
             });

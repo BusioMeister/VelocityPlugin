@@ -32,7 +32,7 @@ public final class MaintenanceLoginListener {
                         error.getMessage());
             } else if (Boolean.TRUE.equals(deny)) {
                 event.setResult(LoginEvent.ComponentResult.denied(
-                        Component.text("§cPrzerwa techniczna\n§7Whitelista jest włączona.")));
+                        Component.text(Messages.text("maintenance-login-listener.przerwa-techniczna-whitelista-jest-wlaczona"))));
             }
             continuation.resume();
         }));

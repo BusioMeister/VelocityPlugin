@@ -24,7 +24,7 @@ public class ReplyCommand implements SimpleCommand {
     @Override
     public void execute(Invocation invocation) {
         if (!(invocation.source() instanceof Player)) {
-            invocation.source().sendMessage(Component.text("Tej komendy może użyć tylko gracz."));
+            invocation.source().sendMessage(Component.text(Messages.text("reply-command.tej-komendy-moze-uzyc-tylko-gracz")));
             return;
         }
 
@@ -32,27 +32,27 @@ public class ReplyCommand implements SimpleCommand {
         String[] args = invocation.arguments();
 
         if (args.length == 0) {
-            sender.sendMessage(Component.text("§cUżycie: /r <wiadomość>"));
+            sender.sendMessage(Component.text(Messages.text("reply-command.uzycie-r")));
             return;
         }
 
         // Sprawdź, do kogo gracz ma odpowiedzieć
         UUID targetUuid = lastMessagerMap.get(sender.getUniqueId());
         if (targetUuid == null) {
-            sender.sendMessage(Component.text("§cNie masz komu odpowiedzieć."));
+            sender.sendMessage(Component.text(Messages.text("reply-command.nie-masz-komu-odpowiedziec")));
             return;
         }
 
         Optional<Player> targetOptional = proxy.getPlayer(targetUuid);
         if (!targetOptional.isPresent()) {
-            sender.sendMessage(Component.text("§cGracz, któremu próbujesz odpowiedzieć, jest offline."));
+            sender.sendMessage(Component.text(Messages.text("reply-command.gracz-ktoremu-probujesz-odpowiedziec-jest-offline")));
             return;
         }
         Player target = targetOptional.get();
 
         String message = String.join(" ", args);
         if (message.isBlank() || message.length() > 2_048) {
-            sender.sendMessage(Component.text("§cWiadomość musi mieć od 1 do 2048 znaków."));
+            sender.sendMessage(Component.text(Messages.text("reply-command.wiadomosc-musi-miec-od-1-do-2048")));
             return;
         }
         UUID senderUuid = sender.getUniqueId();
@@ -65,20 +65,20 @@ public class ReplyCommand implements SimpleCommand {
             Player currentSender = proxy.getPlayer(senderUuid).orElse(null);
             if (currentSender != sender) return;
             if (error != null) {
-                sender.sendMessage(Component.text("§cNie udało się sprawdzić ustawień prywatnych wiadomości."));
+                sender.sendMessage(Component.text(Messages.text("reply-command.nie-udalo-sie-sprawdzic-ustawien-prywatnych-wiadomosci")));
                 return;
             }
             if (Boolean.TRUE.equals(targetDisabled)) {
-                sender.sendMessage(Component.text("§cTen gracz ma wyłączone prywatne wiadomości."));
+                sender.sendMessage(Component.text(Messages.text("reply-command.ten-gracz-ma-wylaczone-prywatne-wiadomosci")));
                 return;
             }
             Player currentTarget = proxy.getPlayer(targetUuid).orElse(null);
             if (currentTarget == null || currentTarget != target) {
-                sender.sendMessage(Component.text("§cGracz, któremu próbujesz odpowiedzieć, jest offline."));
+                sender.sendMessage(Component.text(Messages.text("reply-command.gracz-ktoremu-probujesz-odpowiedziec-jest-offline")));
                 return;
             }
-            currentTarget.sendMessage(Component.text("§3" + sender.getUsername() + "§b -> Ja §b" + message));
-            currentSender.sendMessage(Component.text("§3 Ja -> " + currentTarget.getUsername() + " §b" + message));
+            currentTarget.sendMessage(Component.text(Messages.text("reply-command.ja", sender.getUsername(), message)));
+            currentSender.sendMessage(Component.text(Messages.text("reply-command.ja-2", currentTarget.getUsername(), message)));
         });
     }
 

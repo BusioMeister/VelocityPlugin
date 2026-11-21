@@ -49,6 +49,11 @@ public class VelocityPlugin {
     @Subscribe
     public void onProxyInitialize(ProxyInitializeEvent event) {
         logger.info("VelocitySector Plugin został uruchomiony!");
+        try {
+            Messages.initialize(dataDirectory);
+        } catch (java.io.IOException error) {
+            logger.warn("Could not load messages.properties; defaults remain active", error);
+        }
         ServerListMotd motd = new ServerListMotd(dataDirectory, logger);
         proxy.getEventManager().register(this, motd);
         proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder("motd").plugin(this).build(), motd);
@@ -60,6 +65,17 @@ public class VelocityPlugin {
                 System.getenv().getOrDefault("AISECTOR_REDIS_PASSWORD", ""));
         redisManager = new RedisManager(redisHost, redisPort, redisPassword,
                 message -> logger.warn("{}", message));
+        redisManager.subscribe(new redis.clients.jedis.JedisPubSub() {
+            @Override public void onMessage(String channel, String request) {
+                if (!Messages.RELOAD_CHANNEL.equals(channel) || request == null || request.length() != 36) return;
+                try {
+                    java.util.UUID.fromString(request);
+                    Messages.reload();
+                } catch (IllegalArgumentException | java.io.IOException error) {
+                    logger.warn("Could not apply network message reload", error);
+                }
+            }
+        }, Messages.RELOAD_CHANNEL);
         String mongoUri = System.getProperty("aisector.mongodb.uri",
                 System.getenv().getOrDefault("AISECTOR_MONGODB_URI", "mongodb://127.0.0.1:27017"));
         String mongoDatabase = System.getProperty("aisector.mongodb.database",
@@ -143,7 +159,7 @@ public class VelocityPlugin {
                                     if (maintenance.isMaintenanceEnabled()) return;
                                     proxy.getAllPlayers().forEach(p -> p.sendMessage(
                                             net.kyori.adventure.text.Component.text(
-                                                    "§aPrzerwa techniczna zakończona — whitelista wyłączona.")));
+                                                    Messages.text("velocity-plugin.przerwa-techniczna-zakonczona-whitelista-wylaczona"))));
                                 });
                             }
                         });
@@ -172,16 +188,14 @@ public class VelocityPlugin {
                             throw new IllegalArgumentException("type");
                         String text;
                         if ("kick".equals(type)) {
-                            text = "§c" + name + " został wyrzucony §8- §f" + reason + " §8by §f" + by;
+                            text = Messages.text("moderation.kick", name, reason, by);
                         } else {
                             if (!json.has("perm") || !json.get("perm").isJsonPrimitive()
                                     || !json.getAsJsonPrimitive("perm").isBoolean()) throw new IllegalArgumentException("perm");
                             boolean perm = json.get("perm").getAsBoolean();
                             long minutes = boundedLong(json, "minutes", 0, 0, Long.MAX_VALUE);
-                            String time = perm ? "permanentnie" : (minutes + " min");
-                            text = (type.equals("ip")
-                                    ? ("§c" + name + " został zbanowany IP §7(" + time + ") §8- §f" + reason + " §8by §f" + by)
-                                    : ("§c" + name + " został zbanowany §7(" + time + ") §8- §f" + reason + " §8by §f" + by));
+                            String time = perm ? Messages.text("moderation.permanent") : Messages.text("moderation.minutes", minutes);
+                            text = Messages.text(type.equals("ip") ? "moderation.ban-ip" : "moderation.ban", name, time, reason, by);
                         }
                         if (!shuttingDown) proxy.getAllPlayers().forEach(p -> p.sendMessage(net.kyori.adventure.text.Component.text(text)));
                     } else if (RedisChannels.BAN_KICK.equals(channel)) {

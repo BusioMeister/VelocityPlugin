@@ -71,11 +71,11 @@ public final class PlayerJoinVelocityListener {
         if (event.getPreviousServer() != null) return;
         Player player = event.getPlayer();
         player.sendMessage(Component.text("✦ ", TextColor.color(0xff3838))
-                .append(Component.text("Witaj, ", NamedTextColor.GRAY))
+                .append(Component.text(Messages.text("player-join-velocity-listener.witaj"), NamedTextColor.GRAY))
                 .append(Component.text(player.getUsername(), NamedTextColor.WHITE))
-                .append(Component.text("! Dobrze, że jesteś na ", NamedTextColor.GRAY))
-                .append(Component.text("LastPlay.net", TextColor.color(0xffca55), TextDecoration.BOLD))
-                .append(Component.text(". Miłej gry!", NamedTextColor.GRAY)));
+                .append(Component.text(Messages.text("player-join-velocity-listener.dobrze-ze-jestes-na"), NamedTextColor.GRAY))
+                .append(Component.text(Messages.text("player-join-velocity-listener.lastplay-net"), TextColor.color(0xffca55), TextDecoration.BOLD))
+                .append(Component.text(Messages.text("player-join-velocity-listener.milej-gry"), NamedTextColor.GRAY)));
     }
 
     @Subscribe

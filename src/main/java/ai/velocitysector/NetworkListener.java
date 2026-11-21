@@ -206,7 +206,7 @@ public abstract class NetworkListener extends JedisPubSub {
                     admin.sendMessage(
                             r("Gracz o nicku '")
                                     .append(y(targetName))
-                                    .append(r("' nie jest online."))
+                                    .append(r(Messages.text("network-listener.nie-jest-online")))
                     ));
             return;
         }
@@ -241,7 +241,7 @@ public abstract class NetworkListener extends JedisPubSub {
 
         if (!targetServerOpt.isPresent()) {
             adminOpt.get().sendMessage(
-                    r("Wystąpił błąd: Serwer docelowy nie istnieje.")
+                    r(Messages.text("network-listener.wystapil-blad-serwer-docelowy-nie-istnieje"))
             );
             return;
         }
@@ -254,7 +254,7 @@ public abstract class NetworkListener extends JedisPubSub {
         UUID targetId = UUID.fromString(data.get("targetUUID").getAsString());
         if (proxy.getPlayer(targetId).flatMap(Player::getCurrentServer)
                 .filter(connection -> connection.getServer().equals(targetServer)).isEmpty()) {
-            admin.sendMessage(lc("§cGracz zmienił sektor. Spróbuj ponownie."));
+            admin.sendMessage(lc(Messages.text("network-listener.gracz-zmienil-sektor-sprobuj-ponownie")));
             return;
         }
         storePendingTargetAsync(targetKey, locationJson.toString(), cleanupTokenKey, cleanupToken)
@@ -266,7 +266,7 @@ public abstract class NetworkListener extends JedisPubSub {
                     }
                     if (error != null) {
                         logger.error("Could not save admin teleport target for {}", admin.getUsername(), error);
-                        admin.sendMessage(lc("§cNie udało się przygotować teleportacji."));
+                        admin.sendMessage(lc(Messages.text("network-listener.nie-udalo-sie-przygotowac-teleportacji")));
                         return;
                     }
                     requestSaveThenTransfer(admin, targetServer, admin.getUsername(), null,
@@ -287,7 +287,7 @@ public abstract class NetworkListener extends JedisPubSub {
                         return null;
                     });
         } else {
-            sendMessageToPlayer(adminName, "§cGracz o nicku '" + targetName + "' nie jest online w sieci.");
+            sendMessageToPlayer(adminName, Messages.text("network-listener.gracz-o-nicku-nie-jest-online-w", targetName));
         }
     }
 
@@ -301,14 +301,14 @@ public abstract class NetworkListener extends JedisPubSub {
 
             // powiadom requestera (jeśli istnieje)
             if (requesterOpt.isPresent()) {
-                sendMessageToPlayer(requesterName, "§cGracz o nicku '" + targetName + "' nie jest online w sieci.");
+                sendMessageToPlayer(requesterName, Messages.text("network-listener.gracz-o-nicku-nie-jest-online-w", targetName));
             }
             // opcjonalnie: jeśli requester nie istnieje, to i tak nic nie wyślesz
 
             return;
         }
         if (requesterName.equalsIgnoreCase(targetName)) {
-            sendMessageToPlayer(requesterName, "§cNie możesz wysłać prośby do samego siebie.");
+            sendMessageToPlayer(requesterName, Messages.text("network-listener.nie-mozesz-wyslac-prosby-do-samego-siebie"));
             return;
         }
 
@@ -325,7 +325,7 @@ public abstract class NetworkListener extends JedisPubSub {
             return pending;
         });
         if (acceptanceInProgress.get()) {
-            requester.sendMessage(r("Odbiorca właśnie akceptuje poprzednią prośbę. Spróbuj ponownie za chwilę."));
+            requester.sendMessage(r(Messages.text("network-listener.odbiorca-wlasnie-akceptuje-poprzednia-prosbe-sprobuj-ponownie")));
             return;
         }
         CompletableFuture.delayedExecutor(60, TimeUnit.SECONDS).execute(() -> {
@@ -337,16 +337,16 @@ public abstract class NetworkListener extends JedisPubSub {
             });
             if (!expired.get()) return;
             proxy.getPlayer(pending.requesterUuid()).ifPresent(expiredRequester ->
-                    expiredRequester.sendMessage(r("Twoja prośba o teleportację wygasła.")));
+                    expiredRequester.sendMessage(r(Messages.text("network-listener.twoja-prosba-o-teleportacje-wygasla"))));
         });
         logger.info("[TPA] Dodano prośbę od " + requester.getUsername() + " do " + target.getUsername() + ". Mapa próśb: " + tpaRequests);
-        requester.sendMessage(g("Wysłano prośbę o teleportację do gracza ").append(y(target.getUsername())));
+        requester.sendMessage(g(Messages.text("network-listener.teleport-request-sent")).append(y(target.getUsername())));
 
 
         target.sendMessage(
                 prefixTpa()
                         .append(g("Gracz ").append(y(requester.getUsername()))
-                                .append(g(" chce się do Ciebie przeteleportować. Wpisz "))
+                                .append(g(Messages.text("network-listener.chce-sie-do-ciebie-przeteleportowac-wpisz")))
                                 .append(gr("/tpaccept")
                                         .clickEvent(ClickEvent.runCommand("/tpaccept")))
                         ));
@@ -366,25 +366,25 @@ public abstract class NetworkListener extends JedisPubSub {
         PendingTpaRequest pending = tpaRequests.get(accepterUuid);
         if (pending == null) {
             accepter.sendMessage(
-                    r("Nie masz żadnych oczekujących próśb.")
+                    r(Messages.text("network-listener.nie-masz-zadnych-oczekujacych-prosb"))
             );
 
             return;
         }
         if (pending.isExpired(System.nanoTime())) {
             tpaRequests.remove(accepterUuid, pending);
-            accepter.sendMessage(r("Ta prośba o teleportację już wygasła."));
+            accepter.sendMessage(r(Messages.text("network-listener.ta-prosba-o-teleportacje-juz-wygasla")));
             proxy.getPlayer(pending.requesterUuid()).ifPresent(requester ->
-                    requester.sendMessage(r("Twoja prośba o teleportację wygasła.")));
+                    requester.sendMessage(r(Messages.text("network-listener.twoja-prosba-o-teleportacje-wygasla"))));
             return;
         }
         if (pending.claimed()) {
-            accepter.sendMessage(r("Ta prośba jest już obsługiwana."));
+            accepter.sendMessage(r(Messages.text("network-listener.ta-prosba-jest-juz-obslugiwana")));
             return;
         }
         PendingTpaRequest claimed = pending.claim();
         if (!tpaRequests.replace(accepterUuid, pending, claimed)) {
-            accepter.sendMessage(r("Prośba została już obsłużona lub wygasła."));
+            accepter.sendMessage(r(Messages.text("network-listener.prosba-zostala-juz-obsluzona-lub-wygasla")));
             return;
         }
         UUID requesterUuid = pending.requesterUuid();
@@ -392,7 +392,7 @@ public abstract class NetworkListener extends JedisPubSub {
         Optional<Player> requesterOpt = proxy.getPlayer(requesterUuid);
         if (requesterOpt.isEmpty()) {
             tpaRequests.remove(accepterUuid, claimed);
-            accepter.sendMessage(r("Gracz składający prośbę nie jest już online."));
+            accepter.sendMessage(r(Messages.text("network-listener.gracz-skladajacy-prosbe-nie-jest-juz-online")));
             return;
         }
         Player requester = requesterOpt.get();
@@ -404,7 +404,7 @@ public abstract class NetworkListener extends JedisPubSub {
                 logger.warn("[TPA] requester lub accepter nie ma currentServer ({} / {})",
                         requester.getUsername(), accepter.getUsername());
                 tpaRequests.replace(accepterUuid, claimed, pending);
-                accepter.sendMessage(r("Nie udało się ustalić serwera gracza. Prośba pozostała aktywna."));
+                accepter.sendMessage(r(Messages.text("network-listener.nie-udalo-sie-ustalic-serwera-gracza-prosba")));
                 return;
             }
 
@@ -426,7 +426,7 @@ public abstract class NetworkListener extends JedisPubSub {
                 p.z = loc.z();
                 p.yaw = loc.yaw();
                 p.pitch = loc.pitch();
-                p.message = "§aZostałeś przeteleportowany.";
+                p.message = Messages.text("network-listener.teleport-completed");
 
                 JsonCodec<LocalTpaTeleportPacket> codec = new JsonCodec<>(LocalTpaTeleportPacket.class);
                 String payloadJson = codec.encode(p);
@@ -470,7 +470,7 @@ public abstract class NetworkListener extends JedisPubSub {
         } catch (RuntimeException exception) {
             tpaRequests.replace(accepterUuid, claimed, pending);
             logger.warn("Could not prepare TPA acceptance for {}", requester.getUsername(), exception);
-            accepter.sendMessage(r("Nie udało się przygotować teleportacji. Spróbuj ponownie."));
+            accepter.sendMessage(r(Messages.text("network-listener.nie-udalo-sie-przygotowac-teleportacji-sprobuj-ponownie")));
         }
     }
 
@@ -479,18 +479,18 @@ public abstract class NetworkListener extends JedisPubSub {
         publish.whenComplete((ignored, error) -> {
             if (error == null) {
                 if (!tpaRequests.remove(accepter.getUniqueId(), claimed)) return;
-                accepter.sendMessage(gr("Zaakceptowałeś prośbę od ").append(y(requester.getUsername())));
+            accepter.sendMessage(gr(Messages.text("network-listener.teleport-request-accepted")).append(y(requester.getUsername())));
                 requester.sendMessage(gr("Gracz ").append(y(accepter.getUsername()))
-                        .append(gr(" zaakceptował Twoją prośbę.")));
+                        .append(gr(Messages.text("network-listener.zaakceptowal-twoja-prosbe"))));
                 return;
             }
 
             logger.error("Could not publish TPA acceptance for {}", requester.getUsername(), error);
             if (pending.isExpired(System.nanoTime())) {
                 tpaRequests.remove(accepter.getUniqueId(), claimed);
-                accepter.sendMessage(r("Prośba o teleportację wygasła przed wykonaniem."));
+                accepter.sendMessage(r(Messages.text("network-listener.prosba-o-teleportacje-wygasla-przed-wykonaniem")));
             } else if (tpaRequests.replace(accepter.getUniqueId(), claimed, pending)) {
-                accepter.sendMessage(r("Nie udało się zlecić teleportacji. Prośba pozostała aktywna."));
+                accepter.sendMessage(r(Messages.text("network-listener.nie-udalo-sie-zlecic-teleportacji-prosba-pozostala")));
             }
         });
     }
@@ -510,7 +510,7 @@ public abstract class NetworkListener extends JedisPubSub {
                     admin.sendMessage(
                             r("Gracz o nicku '")
                                     .append(y(targetName))
-                                    .append(r("' nie jest online."))
+                                    .append(r(Messages.text("network-listener.nie-jest-online")))
                     ));
 
             return;
@@ -519,19 +519,19 @@ public abstract class NetworkListener extends JedisPubSub {
         Player target = targetOpt.get();
         Optional<RegisteredServer> adminServerOpt = adminOpt.get().getCurrentServer().map(ServerConnection::getServer);
         if (adminServerOpt.isEmpty()) {
-            sendMessageToPlayer(adminOpt.get().getUsername(), "§cNie udało się ustalić serwera administratora.");
+            sendMessageToPlayer(adminOpt.get().getUsername(), Messages.text("network-listener.nie-udalo-sie-ustalic-serwera-administratora"));
             return;
         }
         RegisteredServer adminServer = adminServerOpt.get();
         if (!adminServer.getServerInfo().getName().equals(data.get("adminServer").getAsString())) {
-            sendMessageToPlayer(adminOpt.get().getUsername(), "§cZmieniłeś sektor. Ponów przywołanie.");
+            sendMessageToPlayer(adminOpt.get().getUsername(), Messages.text("network-listener.zmieniles-sektor-ponow-przywolanie"));
             return;
         }
         boolean operator = data.has("operator") && data.get("operator").isJsonPrimitive()
                 && data.getAsJsonPrimitive("operator").isBoolean() && data.get("operator").getAsBoolean();
         boolean fromSpawn = spawnExitGate.onSpawn(target);
         if (fromSpawn && !operator) {
-            sendMessageToPlayer(adminOpt.get().getUsername(), "§cTylko operator może przywołać gracza ze Spawnu.");
+            sendMessageToPlayer(adminOpt.get().getUsername(), Messages.text("network-listener.tylko-operator-moze-przywolac-gracza-ze-spawnu"));
             return;
         }
         TpaLocation.parse(adminLocation);
@@ -544,7 +544,7 @@ public abstract class NetworkListener extends JedisPubSub {
                 .whenComplete((ignored, error) -> {
                     if (error != null) {
                         logger.error("Could not save summon target for {}", target.getUsername(), error);
-                        sendMessageToPlayer(adminName, "§cNie udało się przygotować przeniesienia gracza.");
+                        sendMessageToPlayer(adminName, Messages.text("network-listener.nie-udalo-sie-przygotowac-przeniesienia-gracza"));
                         return;
                     }
                     requestSaveThenTransfer(target, adminServer, adminName, null,
@@ -562,13 +562,13 @@ public abstract class NetworkListener extends JedisPubSub {
 
         Optional<Player> targetOpt = proxy.getPlayer(targetName);
         if (!targetOpt.isPresent()) {
-            sendMessageToPlayer(requesterName, "§cGracz o nicku '" + targetName + "' nie jest online w sieci.");
+            sendMessageToPlayer(requesterName, Messages.text("network-listener.gracz-o-nicku-nie-jest-online-w", targetName));
             return;
         }
 
         Optional<RegisteredServer> serverOpt = proxy.getServer(targetSectorName);
         if (!serverOpt.isPresent()) {
-            sendMessageToPlayer(requesterName, "§cSerwer o nazwie '" + targetSectorName + "' nie istnieje.");
+            sendMessageToPlayer(requesterName, Messages.text("network-listener.serwer-o-nazwie-nie-istnieje", targetSectorName));
             return;
         }
 
@@ -583,11 +583,11 @@ public abstract class NetworkListener extends JedisPubSub {
                     if (error != null) {
                         logger.error("Could not save forced sector {} for {}", targetSectorName,
                                 targetPlayer.getUsername(), error);
-                        sendMessageToPlayer(requesterName, "§cNie udało się przygotować przeniesienia gracza.");
+                        sendMessageToPlayer(requesterName, Messages.text("network-listener.nie-udalo-sie-przygotowac-przeniesienia-gracza"));
                         return;
                     }
                     requestSaveThenTransfer(targetPlayer, destination, requesterName,
-                            "§aWysłano gracza " + targetName + " na serwer " + targetSectorName + ".",
+                    Messages.text("network-listener.sent-player", targetName, targetSectorName),
                             targetKey, targetSectorName, cleanupTokenKey, cleanupToken, cleanupToken);
                 });
     }
@@ -642,9 +642,9 @@ public abstract class NetworkListener extends JedisPubSub {
         String targetName = data.get("targetName").getAsString();
         String targetSector = onlinePlayersListener.getPlayerSector(targetName);
         if (targetSector != null) {
-            sendMessageToPlayer(requesterName, "§7Gracz §e" + targetName + " §7jest na sektorze §b" + targetSector);
+            sendMessageToPlayer(requesterName, Messages.text("network-listener.gracz-jest-na-sektorze", targetName, targetSector));
         } else {
-            sendMessageToPlayer(requesterName, "§cGracz o nicku '" + targetName + "' nie jest online w sieci.");
+            sendMessageToPlayer(requesterName, Messages.text("network-listener.gracz-o-nicku-nie-jest-online-w", targetName));
         }
     }
 
@@ -988,7 +988,7 @@ public abstract class NetworkListener extends JedisPubSub {
     }
     private Component prefixTpa() {
         return g("[")
-                .append(gr("TPA"))
+                .append(gr(Messages.text("network-listener.tpa")))
                 .append(g("] "));
     }
 

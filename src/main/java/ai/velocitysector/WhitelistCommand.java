@@ -38,7 +38,7 @@ public final class WhitelistCommand implements SimpleCommand {
         String[] args = invocation.arguments();
 
         if (source instanceof Player && !source.hasPermission("aisector.whitelist.manage")) {
-            source.sendMessage(Component.text("§cBrak uprawnień."));
+            source.sendMessage(Component.text(Messages.text("whitelist-command.brak-uprawnien")));
             return;
         }
         if (args.length == 0 || "help".equalsIgnoreCase(args[0])) {
@@ -65,7 +65,7 @@ public final class WhitelistCommand implements SimpleCommand {
 
     private void changeEntry(CommandSource source, String action, String[] args) {
         if (args.length < 2) {
-            source.sendMessage(Component.text("§eUżycie: /vwhitelist " + action + " <nick|uuid>"));
+            source.sendMessage(Component.text(Messages.text("whitelist-command.uzycie-vwhitelist", action)));
             return;
         }
 
@@ -80,13 +80,13 @@ public final class WhitelistCommand implements SimpleCommand {
         }).whenComplete((uuid, error) -> {
             scheduleResponse(source, () -> {
             if (error != null) {
-                source.sendMessage(Component.text("§cNie udało się zaktualizować whitelisty."));
+                source.sendMessage(Component.text(Messages.text("whitelist-command.nie-udalo-sie-zaktualizowac-whitelisty")));
             } else if (uuid == null || uuid.isEmpty()) {
-                source.sendMessage(Component.text("§cNie znaleziono gracza: " + input));
+                source.sendMessage(Component.text(Messages.text("whitelist-command.nie-znaleziono-gracza", input)));
             } else if (action.equals("add")) {
-                source.sendMessage(Component.text("§aDodano do whitelist: " + input + " §8(" + uuid.get() + ")"));
+                source.sendMessage(Component.text(Messages.text("whitelist-command.dodano-do-whitelist", input, uuid.get())));
             } else {
-                source.sendMessage(Component.text("§aUsunięto z whitelist: " + input + " §8(" + uuid.get() + ")"));
+                source.sendMessage(Component.text(Messages.text("whitelist-command.usunieto-z-whitelist", input, uuid.get())));
             }
             });
         });
@@ -96,17 +96,17 @@ public final class WhitelistCommand implements SimpleCommand {
         redis.executeAsync(jedis -> jedis.smembers(WHITELIST_KEY)).whenComplete((entries, error) -> {
             scheduleResponse(source, () -> {
             if (error != null) {
-                source.sendMessage(Component.text("§cNie udało się odczytać whitelisty."));
+                source.sendMessage(Component.text(Messages.text("whitelist-command.nie-udalo-sie-odczytac-whitelisty")));
                 return;
             }
             if (entries == null || entries.isEmpty()) {
-                source.sendMessage(Component.text("§7Whitelist jest pusta."));
+                source.sendMessage(Component.text(Messages.text("whitelist-command.whitelist-jest-pusta")));
                 return;
             }
-            source.sendMessage(Component.text("§6Whitelist (" + entries.size() + "):"));
+            source.sendMessage(Component.text(Messages.text("whitelist-command.whitelist", entries.size())));
             entries.stream().sorted().limit(200).forEach(entry ->
                     source.sendMessage(Component.text(" §7- §f" + entry)));
-            if (entries.size() > 200) source.sendMessage(Component.text("§8… ucięto listę"));
+            if (entries.size() > 200) source.sendMessage(Component.text(Messages.text("whitelist-command.ucieto-liste")));
             });
         });
     }
@@ -117,12 +117,11 @@ public final class WhitelistCommand implements SimpleCommand {
                 .whenComplete((status, error) -> {
                     scheduleResponse(source, () -> {
                     if (error != null) {
-                        source.sendMessage(Component.text("§cNie udało się odczytać statusu whitelisty."));
+                        source.sendMessage(Component.text(Messages.text("whitelist-command.nie-udalo-sie-odczytac-statusu-whitelisty")));
                         return;
                     }
-                    source.sendMessage(Component.text("§7Przerwa: "
-                            + (status.maintenanceEnabled() ? "§cWŁĄCZONA" : "§aWYŁĄCZONA")));
-                    source.sendMessage(Component.text("§7Rozmiar whitelist: §f" + status.whitelistSize()));
+                    source.sendMessage(Component.text(Messages.text("whitelist-command.przerwa", (status.maintenanceEnabled() ? "§cWŁĄCZONA" : "§aWYŁĄCZONA"))));
+                    source.sendMessage(Component.text(Messages.text("whitelist-command.rozmiar-whitelist", status.whitelistSize())));
                     });
                 });
     }
@@ -176,10 +175,10 @@ public final class WhitelistCommand implements SimpleCommand {
     }
 
     private void help(CommandSource source) {
-        source.sendMessage(Component.text("§e/vwhitelist add <nick|uuid>"));
-        source.sendMessage(Component.text("§e/vwhitelist remove <nick|uuid>"));
-        source.sendMessage(Component.text("§e/vwhitelist list"));
-        source.sendMessage(Component.text("§e/vwhitelist status"));
+        source.sendMessage(Component.text(Messages.text("whitelist-command.vwhitelist-add")));
+        source.sendMessage(Component.text(Messages.text("whitelist-command.vwhitelist-remove")));
+        source.sendMessage(Component.text(Messages.text("whitelist-command.vwhitelist-list")));
+        source.sendMessage(Component.text(Messages.text("whitelist-command.vwhitelist-status")));
     }
 
     private record WhitelistStatus(boolean maintenanceEnabled, long whitelistSize) { }

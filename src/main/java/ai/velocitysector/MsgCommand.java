@@ -31,7 +31,7 @@ public class MsgCommand implements SimpleCommand {
 
         // Permission na użycie komendy
         if (sender instanceof Player && !sender.hasPermission("aisector.msg.use")) {
-            sender.sendMessage(Component.text("§cBrak uprawnień do użycia /msg."));
+            sender.sendMessage(Component.text(Messages.text("msg-command.brak-uprawnien-do-uzycia-msg")));
             return;
         }
 
@@ -40,7 +40,7 @@ public class MsgCommand implements SimpleCommand {
                 : "Konsola";
 
         if (args.length < 2) {
-            sender.sendMessage(Component.text("§cUżycie: /msg <gracz> <wiadomość>"));
+            sender.sendMessage(Component.text(Messages.text("msg-command.uzycie-msg")));
             return;
         }
 
@@ -48,7 +48,7 @@ public class MsgCommand implements SimpleCommand {
         Player target = proxy.getPlayer(targetName).orElse(null);
 
         if (target == null) {
-            sender.sendMessage(Component.text("§cGracz " + targetName + " nie jest online."));
+            sender.sendMessage(Component.text(Messages.text("msg-command.gracz-nie-jest-online", targetName)));
             return;
         }
 
@@ -58,15 +58,15 @@ public class MsgCommand implements SimpleCommand {
 
         // Blokada DM po stronie odbiorcy przez uprawnienie (LP)
         if (target.hasPermission("aisector.msg.block") && !senderBypass) {
-            sender.sendMessage(Component.text("§cTen gracz ma wyłączone prywatne wiadomości."));
+            sender.sendMessage(Component.text(Messages.text("msg-command.ten-gracz-ma-wylaczone-prywatne-wiadomosci")));
             return;
         }
 
         String message = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
 
         // Wysłanie wiadomości do obu stron
-        target.sendMessage(Component.text("§3" + senderName + "§b -> Ja §b" + message));
-        sender.sendMessage(Component.text("§3 Ja -> " + target.getUsername() + " §b" + message));
+        target.sendMessage(Component.text(Messages.text("msg-command.ja", senderName, message)));
+        sender.sendMessage(Component.text(Messages.text("msg-command.ja-2", target.getUsername(), message)));
 
         // Zapisanie pary konwersacji dla komendy /r
         if (sender instanceof Player) {

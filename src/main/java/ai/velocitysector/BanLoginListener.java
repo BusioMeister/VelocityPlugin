@@ -48,15 +48,15 @@ public final class BanLoginListener {
             // Clearing it here, before Velocity admits the connection, avoids racing Paper's join handler.
             jedis.del("player:data:" + uuid);
             String userBan = activeBanMessage(jedis, "ban:user:" + uuid, "bans:users", uuid.toString(),
-                    "§cZostałeś zbanowany!\n§7Nick: §f" + name);
+                     Messages.text("moderation.login-ban", name));
             if (userBan != null) return userBan;
             return ip == null ? null : activeBanMessage(jedis, "ban:ip:" + ip, "bans:ips", ip,
-                    "§cZostałeś zbanowany IP!");
+                     Messages.text("moderation.login-ban-ip"));
         }).orTimeout(4, TimeUnit.SECONDS).whenComplete((message, error) -> {
             if (error != null) {
                 logger.error("Could not check bans for {} during login", name, error);
                 event.setResult(LoginEvent.ComponentResult.denied(Component.text(
-                        "Nie można teraz zweryfikować bana. Spróbuj połączyć się ponownie za chwilę.")));
+                        Messages.text("ban-login-listener.nie-mozna-teraz-zweryfikowac-bana-sprobuj-polaczyc"))));
             } else if (message != null) {
                 event.setResult(LoginEvent.ComponentResult.denied(Component.text(message)));
             }
@@ -82,8 +82,9 @@ public final class BanLoginListener {
             // Keep malformed active records fail-closed until an administrator repairs them.
             expiresAt = -1;
         }
-        String time = expiresAt == -1 ? "permanentnie" : "do " + Instant.ofEpochMilli(expiresAt);
-        return prefix + "\n§7Powód: §f" + (reason.isEmpty() ? "Brak" : reason)
-                + "\n§7Przez: §f" + (by.isEmpty() ? "System" : by) + "\n§7Czas: §f" + time;
+        String time = expiresAt == -1 ? Messages.text("moderation.permanent")
+                : Messages.text("moderation.until", Instant.ofEpochMilli(expiresAt));
+        return Messages.text("moderation.login-details", prefix, reason.isEmpty() ? Messages.text("moderation.no-reason") : reason,
+                by.isEmpty() ? Messages.text("moderation.system") : by, time);
     }
 }

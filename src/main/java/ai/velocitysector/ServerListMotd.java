@@ -89,18 +89,18 @@ final class ServerListMotd implements SimpleCommand {
                 source.sendMessage(description);
             } else if (args.length == 1 && args[0].equalsIgnoreCase("reset")) {
                 save(DEFAULT);
-                source.sendMessage(Component.text("Przywrócono domyślne MOTD."));
+                source.sendMessage(Component.text(Messages.text("server-list-motd.przywrocono-domyslne-motd")));
             } else if (args.length > 1 && args[0].equalsIgnoreCase("set")) {
                 save(String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length)));
-                source.sendMessage(Component.text("Zapisano MOTD:").append(Component.newline()).append(description));
+                source.sendMessage(Component.text(Messages.text("server-list-motd.zapisano-motd")).append(Component.newline()).append(description));
             } else {
-                source.sendMessage(Component.text("/motd set <linia 1> | <linia 2> · /motd show · /motd reset"));
+                source.sendMessage(Component.text(Messages.text("server-list-motd.motd-set-motd-show-motd-reset")));
             }
         } catch (IllegalArgumentException error) {
-            source.sendMessage(Component.text("Nieprawidłowe MOTD. Sprawdź format tagów i rozdziel linie znakiem |."));
+            source.sendMessage(Component.text(Messages.text("server-list-motd.nieprawidlowe-motd-sprawdz-format-tagow-i-rozdziel")));
         } catch (IOException error) {
             logger.warn("Nie można zapisać MOTD.", error);
-            source.sendMessage(Component.text("Nie udało się zapisać MOTD. Poprzedni tekst pozostaje aktywny."));
+            source.sendMessage(Component.text(Messages.text("server-list-motd.nie-udalo-sie-zapisac-motd-poprzedni-tekst")));
         }
     }
 
