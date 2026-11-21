@@ -713,7 +713,7 @@ public abstract class NetworkListener extends JedisPubSub {
                             logger.warn("No Paper backend is subscribed to transfer save requests for {}",
                                     player.getUsername());
                         }
-                        notifyTransferFailure(pending, "§cNie udało się zapisać danych gracza. Transfer anulowany.");
+                         notifyTransferFailure(pending, Messages.text("network-listener.failed-player-save"));
                         return;
                     }
 
@@ -728,7 +728,7 @@ public abstract class NetworkListener extends JedisPubSub {
                             logger.warn("Timed out waiting for transfer save acknowledgement for {}",
                                     player.getUsername());
                             notifyTransferFailure(timedOut,
-                                    "§cSerwer nie potwierdził zapisu danych. Transfer anulowany.");
+                                     Messages.text("network-listener.failed-save-ack"));
                         }
                     });
                 });
@@ -778,7 +778,7 @@ public abstract class NetworkListener extends JedisPubSub {
             clearSaveRequestToken(playerUuid, requestId);
             cleanupPendingTarget(pending);
             logger.warn("Source server failed to save transfer data for {}", pending.player().getUsername());
-            notifyTransferFailure(pending, "§cNie udało się zapisać danych gracza. Transfer anulowany.");
+             notifyTransferFailure(pending, Messages.text("network-listener.failed-player-save"));
             return;
         }
 
@@ -791,7 +791,7 @@ public abstract class NetworkListener extends JedisPubSub {
                             cleanupPendingTarget(pending);
                             logger.error("Could not validate pending transfer target for {}",
                                     pending.player().getUsername(), error);
-                            notifyTransferFailure(pending, "§cNie udało się bezpiecznie potwierdzić transferu.");
+                             notifyTransferFailure(pending, Messages.text("network-listener.failed-transfer-ack"));
                         }
                         return;
                     }
@@ -842,7 +842,7 @@ public abstract class NetworkListener extends JedisPubSub {
                 cleanupPendingTarget(pending);
                 logger.warn("Transfer of {} to {} failed after save confirmation",
                         pending.player().getUsername(), pending.destination().getServerInfo().getName(), error);
-                notifyTransferFailure(pending, "§cNie udało się połączyć z serwerem docelowym.");
+                 notifyTransferFailure(pending, Messages.text("network-listener.failed-target-connect"));
                 return;
             }
             if (pending.completionMessage() != null) {
